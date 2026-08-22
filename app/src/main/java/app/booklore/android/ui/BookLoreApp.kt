@@ -67,6 +67,7 @@ import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CollectionsBookmark
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Refresh
@@ -84,6 +85,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -158,6 +160,7 @@ import app.booklore.android.core.network.BookLoreApi
 import app.booklore.android.core.security.SessionStore
 import app.booklore.android.feature.AppUiState
 import app.booklore.android.feature.AppViewModel
+import app.booklore.android.feature.OfflineDownloadState
 import app.booklore.android.feature.Notice
 import app.booklore.android.feature.SyncStatus
 import app.booklore.android.feature.UiError
@@ -287,6 +290,7 @@ fun BookLoreApp(viewModel: AppViewModel) {
                     onRefreshCache = viewModel::refreshCache,
                     onClearCache = viewModel::clearCache,
                     onRefreshStatistics = viewModel::refreshStatistics,
+                    downloadedBookIds = state.downloadedBookIds,
                     coverUrl = viewModel::coverUrl,
                     accessToken = viewModel.accessToken(),
                     serverUrl = viewModel.serverUrl(),
@@ -322,10 +326,14 @@ fun BookLoreApp(viewModel: AppViewModel) {
                             isLoading = state.isDetailLoading,
                             isActionRunning = state.isActionRunning,
                             shelves = state.shelves,
+                            isOfflineAvailable = selectedBook.id in state.downloadedBookIds,
+                            offlineDownloadState = state.offlineDownloadStates[selectedBook.id],
                             onBack = viewModel::clearBookSelection,
                             onUpdateStatus = viewModel::updateReadStatus,
                             onUpdateRating = viewModel::updatePersonalRating,
                             onAssignShelves = viewModel::assignShelves,
+                            onDownload = viewModel::downloadBook,
+                            onDeleteDownload = viewModel::deleteDownloadedBook,
                             onOpenReader = {
                                 if (selectedBook.supportsEpubReader()) {
                                     EpubReaderActivity.intent(context, selectedBook)?.let(readerLauncher::launch)
@@ -619,6 +627,7 @@ private fun CatalogScreen(
     onRefreshCache: () -> Unit,
     onClearCache: () -> Unit,
     onRefreshStatistics: (Int) -> Unit,
+    downloadedBookIds: Set<Long>,
     coverUrl: (Long) -> String?,
     accessToken: String?,
     serverUrl: String?,
@@ -837,6 +846,7 @@ private fun CatalogScreen(
                                     pageTitle = stringResource(R.string.libraries),
                                     pageTitleAlpha = contentTitleAlpha,
                                     compactBookGrid = compactBookGrid,
+                                    downloadedBookIds = downloadedBookIds,
                                 )
                                 2 -> SearchCatalog(
                                     books = state.books,
@@ -850,6 +860,7 @@ private fun CatalogScreen(
                                     pageTitle = stringResource(R.string.navigation_search),
                                     pageTitleAlpha = contentTitleAlpha,
                                     compactBookGrid = compactBookGrid,
+                                    downloadedBookIds = downloadedBookIds,
                                 )
                                 else -> SettingsCatalog(
                                     serverUrl = serverUrl,
@@ -2401,12 +2412,14 @@ private fun SearchCatalog(
     pageTitle: String,
     pageTitleAlpha: Float,
     compactBookGrid: Boolean,
+    downloadedBookIds: Set<Long>,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var selectedLibraryId by rememberSaveable { mutableStateOf<Long?>(null) }
     var selectedShelfId by rememberSaveable { mutableStateOf<Long?>(null) }
     var selectedStatus by rememberSaveable { mutableStateOf("all") }
     var selectedFormat by rememberSaveable { mutableStateOf("all") }
+    var downloadedOnly by rememberSaveable { mutableStateOf(false) }
     var sortOption by rememberSaveable { mutableStateOf(BookSortOption.DEFAULT) }
     var sortAscending by rememberSaveable { mutableStateOf(true) }
     var resultsOpen by rememberSaveable { mutableStateOf(false) }
@@ -2419,13 +2432,14 @@ private fun SearchCatalog(
             .sorted()
             .toList()
     }
-    val results = remember(books, query, selectedLibraryId, selectedShelfId, selectedStatus, selectedFormat, sortOption, sortAscending) {
+    val results = remember(books, query, selectedLibraryId, selectedShelfId, selectedStatus, selectedFormat, downloadedOnly, downloadedBookIds, sortOption, sortAscending) {
         books.asSequence()
             .filter { book ->
                 (selectedLibraryId == null || book.libraryId == selectedLibraryId) &&
                     (selectedShelfId == null || book.shelves.any { it.id == selectedShelfId }) &&
                     (selectedStatus == "all" || book.readStatus == selectedStatus) &&
                     (selectedFormat == "all" || book.formatName().equals(selectedFormat, ignoreCase = true)) &&
+                    (!downloadedOnly || book.id in downloadedBookIds) &&
                     (query.isBlank() || book.displayTitle().contains(query, ignoreCase = true) || book.displayAuthors().contains(query, ignoreCase = true))
             }
             .toList()
@@ -2476,6 +2490,8 @@ private fun SearchCatalog(
                 formats = formats,
                 selectedFormat = selectedFormat,
                 onFormatSelected = { selectedFormat = it },
+                downloadedOnly = downloadedOnly,
+                onDownloadedOnlyChange = { downloadedOnly = it },
                 sortOption = sortOption,
                 onSortSelected = { sortOption = it },
                 sortAscending = sortAscending,
@@ -2487,6 +2503,7 @@ private fun SearchCatalog(
                     selectedShelfId = null
                     selectedStatus = "all"
                     selectedFormat = "all"
+                    downloadedOnly = false
                     sortOption = BookSortOption.DEFAULT
                     sortAscending = true
                 },
@@ -2513,6 +2530,8 @@ private fun SearchFilterForm(
     formats: List<String>,
     selectedFormat: String,
     onFormatSelected: (String) -> Unit,
+    downloadedOnly: Boolean,
+    onDownloadedOnlyChange: (Boolean) -> Unit,
     sortOption: BookSortOption,
     onSortSelected: (BookSortOption) -> Unit,
     sortAscending: Boolean,
@@ -2585,6 +2604,13 @@ private fun SearchFilterForm(
                         onSelected = onFormatSelected,
                     )
                 }
+                FilterGroupLabel(stringResource(R.string.offline_reading))
+                FilterChip(
+                    selected = downloadedOnly,
+                    onClick = { onDownloadedOnlyChange(!downloadedOnly) },
+                    label = { Text(stringResource(R.string.downloaded_only)) },
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
                 FilterGroupLabel(stringResource(R.string.filter_sort))
                 SortChipRow(
                     selected = sortOption,
@@ -2801,9 +2827,11 @@ private fun LibraryCatalog(
     pageTitle: String,
     pageTitleAlpha: Float,
     compactBookGrid: Boolean,
+    downloadedBookIds: Set<Long>,
 ) {
     var selectedLibraryId by rememberSaveable { mutableStateOf<Long?>(null) }
     var selectedShelfId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var downloadedOnly by rememberSaveable { mutableStateOf(false) }
     // Restore the persisted sort selection; write back on every change.
     val context = LocalContext.current
     val sessionStore = remember { SessionStore(context.applicationContext) }
@@ -2819,10 +2847,11 @@ private fun LibraryCatalog(
     LaunchedEffect(sortOption, sortAscending) {
         sessionStore.writeLibrarySortSettings(sortOption.name, sortAscending)
     }
-    val shownBooks = remember(books, selectedLibraryId, selectedShelfId, sortOption, sortAscending) {
+    val shownBooks = remember(books, selectedLibraryId, selectedShelfId, downloadedOnly, downloadedBookIds, sortOption, sortAscending) {
         books.filter { book ->
             (selectedLibraryId == null || book.libraryId == selectedLibraryId) &&
-                (selectedShelfId == null || book.shelves.any { it.id == selectedShelfId })
+            (selectedShelfId == null || book.shelves.any { it.id == selectedShelfId }) &&
+            (!downloadedOnly || book.id in downloadedBookIds)
         }.sortedByOption(sortOption, sortAscending)
     }
     BookGrid(
@@ -2861,6 +2890,17 @@ private fun LibraryCatalog(
                         onSelected = { selectedShelfId = it },
                     )
                 }
+            }
+            CatalogFilterGroup(
+                icon = Icons.Filled.Download,
+                title = stringResource(R.string.offline_reading),
+            ) {
+                FilterChip(
+                    selected = downloadedOnly,
+                    onClick = { downloadedOnly = !downloadedOnly },
+                    label = { Text(stringResource(R.string.downloaded_only)) },
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
             }
             CatalogFilterGroup(
                 icon = Icons.AutoMirrored.Filled.Sort,
@@ -3084,10 +3124,14 @@ private fun BookDetailScreen(
     isLoading: Boolean,
     isActionRunning: Boolean,
     shelves: List<Shelf>,
+    isOfflineAvailable: Boolean,
+    offlineDownloadState: OfflineDownloadState?,
     onBack: () -> Unit,
     onUpdateStatus: (Long, String) -> Unit,
     onUpdateRating: (Long, Int) -> Unit,
     onAssignShelves: (Long, Set<Long>, Set<Long>) -> Unit,
+    onDownload: (Book) -> Unit,
+    onDeleteDownload: (Book) -> Unit,
     onOpenReader: () -> Unit,
     coverUrl: String?,
     accessToken: String?,
@@ -3162,6 +3206,17 @@ private fun BookDetailScreen(
                         book.metadata?.description?.takeIf(String::isNotBlank) ?: stringResource(R.string.no_description),
                         style = MaterialTheme.typography.bodyLarge,
                     )
+                }
+                if (book.supportsEpubReader() || book.supportsPdfReader()) {
+                    item {
+                        OfflineDownloadControl(
+                            isDownloaded = isOfflineAvailable,
+                            downloadState = offlineDownloadState,
+                            enabled = !isActionRunning,
+                            onDownload = { onDownload(book) },
+                            onDelete = { onDeleteDownload(book) },
+                        )
+                    }
                 }
                 item {
                     Button(
@@ -3415,6 +3470,54 @@ private fun SettingsCatalog(
     }
 }
 
+@Composable
+private fun OfflineDownloadControl(
+    isDownloaded: Boolean,
+    downloadState: OfflineDownloadState?,
+    enabled: Boolean,
+    onDownload: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(stringResource(R.string.offline_reading), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        when {
+            downloadState != null -> {
+                Text(stringResource(R.string.download_in_progress), style = MaterialTheme.typography.bodyMedium)
+                LinearProgressIndicator(
+                    progress = { downloadState.progress ?: 0f },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                downloadState.totalBytes?.let { total ->
+                    Text(
+                        stringResource(R.string.download_bytes, formatCacheSize(downloadState.bytesRead), formatCacheSize(total)),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            isDownloaded -> {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Download, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.downloaded), modifier = Modifier.weight(1f))
+                    OutlinedButton(onClick = onDelete, enabled = enabled) {
+                        Icon(Icons.Filled.DeleteSweep, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.remove_download))
+                    }
+                }
+            }
+            else -> {
+                Button(onClick = onDownload, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Filled.Download, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.download_for_offline))
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CacheScreen(
@@ -3524,11 +3627,13 @@ private fun CacheBucketRow(bucket: app.booklore.android.core.cache.CacheBucket) 
     val titleRes = when (bucket.id) {
         CacheBucketId.COVER_IMAGES -> R.string.cache_cover_images
         CacheBucketId.READER_FILES -> R.string.cache_reader_files
+        CacheBucketId.OFFLINE_BOOKS -> R.string.cache_offline_books
         CacheBucketId.OFFLINE_CATALOG -> R.string.cache_offline_catalog
     }
     val summaryRes = when (bucket.id) {
         CacheBucketId.COVER_IMAGES -> R.string.cache_cover_images_summary
         CacheBucketId.READER_FILES -> R.string.cache_reader_files_summary
+        CacheBucketId.OFFLINE_BOOKS -> R.string.cache_offline_books_summary
         CacheBucketId.OFFLINE_CATALOG -> R.string.cache_offline_catalog_summary
     }
     Column(
@@ -3946,6 +4051,8 @@ private fun Notice.message(): String = when (this) {
     Notice.ProgressSaved -> stringResource(R.string.progress_saved)
     Notice.ShelvesUpdated -> stringResource(R.string.shelves_updated)
     Notice.CacheCleared -> stringResource(R.string.cache_cleared)
+    Notice.Downloaded -> stringResource(R.string.downloaded)
+    Notice.DownloadDeleted -> stringResource(R.string.download_removed)
 }
 
 private fun Book.lastReadDate(): String? {

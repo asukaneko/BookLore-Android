@@ -300,12 +300,22 @@ class BookLoreApi(private val sessionStore: SessionStore) {
         authenticatedRequest("/api/v1/books/shelves", method = "POST", body = body)
     }
 
-    suspend fun downloadEpub(bookId: Long, bookType: String, destination: File): File {
-        return downloadBook(bookId, bookType, destination)
+    suspend fun downloadEpub(
+        bookId: Long,
+        bookType: String,
+        destination: File,
+        onProgress: (bytesRead: Long, totalBytes: Long?) -> Unit = { _, _ -> },
+    ): File {
+        return downloadBook(bookId, bookType, destination, onProgress)
     }
 
-    suspend fun downloadPdf(bookId: Long, bookType: String, destination: File): File {
-        return downloadBook(bookId, bookType, destination)
+    suspend fun downloadPdf(
+        bookId: Long,
+        bookType: String,
+        destination: File,
+        onProgress: (bytesRead: Long, totalBytes: Long?) -> Unit = { _, _ -> },
+    ): File {
+        return downloadBook(bookId, bookType, destination, onProgress)
     }
 
     /**
@@ -347,16 +357,21 @@ class BookLoreApi(private val sessionStore: SessionStore) {
         return destination
     }
 
-    private suspend fun downloadBook(bookId: Long, bookType: String, destination: File): File {
+    private suspend fun downloadBook(
+        bookId: Long,
+        bookType: String,
+        destination: File,
+        onProgress: (bytesRead: Long, totalBytes: Long?) -> Unit,
+    ): File {
         val session = sessionStore.read() ?: throw ApiException(401, "No active session")
-        val initial = downloadBookContent(session, bookId, bookType, destination)
+        val initial = downloadBookContent(session, bookId, bookType, destination, onProgress)
         if (initial.code != 401) {
             initial.requireSuccess()
             return destination
         }
 
         val refreshed = refreshSession(session)
-        downloadBookContent(refreshed, bookId, bookType, destination).requireSuccess()
+        downloadBookContent(refreshed, bookId, bookType, destination, onProgress).requireSuccess()
         return destination
     }
 
@@ -398,6 +413,7 @@ class BookLoreApi(private val sessionStore: SessionStore) {
         bookId: Long,
         bookType: String,
         destination: File,
+        onProgress: (bytesRead: Long, totalBytes: Long?) -> Unit = { _, _ -> },
     ): NetworkResponse {
         val url = bookContentUrl(session, bookId, bookType)
         val temporary = File(destination.parentFile, "${destination.name}.part")
@@ -416,8 +432,19 @@ class BookLoreApi(private val sessionStore: SessionStore) {
                     NetworkResponse(response.code, response.body?.string().orEmpty().take(512))
                 } else {
                     val responseBody = response.body ?: return@use NetworkResponse(502, "Missing book content")
+                    val totalBytes = responseBody.contentLength().takeIf { it > 0L }
                     responseBody.byteStream().use { input ->
-                        temporary.outputStream().buffered().use { output -> input.copyTo(output) }
+                        temporary.outputStream().buffered().use { output ->
+                            val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
+                            var bytesRead = 0L
+                            while (true) {
+                                val count = input.read(buffer)
+                                if (count < 0) break
+                                output.write(buffer, 0, count)
+                                bytesRead += count
+                                onProgress(bytesRead, totalBytes)
+                            }
+                        }
                     }
                     if (!temporary.renameTo(destination)) {
                         temporary.copyTo(destination, overwrite = true)
@@ -595,6 +622,7 @@ class BookLoreApi(private val sessionStore: SessionStore) {
     companion object {
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
         private val EMPTY_JSON_BODY = "{}".toRequestBody(JSON_MEDIA_TYPE)
+        private const val DOWNLOAD_BUFFER_SIZE = 32 * 1024
 
         // One shared client for every BookLoreApi instance so cover downloads
         // reuse the same connection pool and thread pools instead of paying

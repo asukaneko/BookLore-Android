@@ -56,6 +56,8 @@
     <string name="status_updated">阅读状态已更新</string>
     <string name="rating_updated">&#x4E2A;&#x4EBA;&#x8BC4;&#x5206;&#x5DF2;&#x66F4;&#x65B0;</string>
     <string name="shelves_updated">&#x4E66;&#x67B6;&#x5DF2;&#x66F4;&#x65B0;</string>
+    <string name="downloaded">已下载</string>
+    <string name="download_removed">已移除下载</string>
     <string name="close">关闭</string>
     <string name="navigation_libraries">书库</string>
     <string name="navigation_shelves">书架</string>
@@ -84,11 +86,13 @@
     <string name="content_description_open_cache">&#x6253;&#x5F00;&#x7F13;&#x5B58;&#x7BA1;&#x7406;</string>
     <string name="content_description_refresh_cache">&#x5237;&#x65B0;&#x7F13;&#x5B58;&#x5927;&#x5C0F;</string>
     <string name="cache_total_size">&#x7F13;&#x5B58;&#x603B;&#x5927;&#x5C0F;&#xFF1A;%1$s</string>
-    <string name="cache_description">&#x6E05;&#x7406;&#x4E34;&#x65F6;&#x6587;&#x4EF6;&#x548C;&#x79BB;&#x7EBF;&#x4E66;&#x76EE;&#x6570;&#x636E;&#x3002;&#x5F85;&#x540C;&#x6B65;&#x7684;&#x53D8;&#x66F4;&#x4F1A;&#x4FDD;&#x7559;&#x3002;</string>
+    <string name="cache_description">清理临时文件、离线书籍和离线书目数据。待同步的更改会保留。</string>
     <string name="cache_cover_images">&#x5C01;&#x9762;&#x56FE;&#x7247;</string>
     <string name="cache_cover_images_summary">&#x5DF2;&#x4E0B;&#x8F7D;&#x7684;&#x56FE;&#x4E66;&#x5C01;&#x9762;</string>
     <string name="cache_reader_files">&#x9605;&#x8BFB;&#x5668;&#x6587;&#x4EF6;</string>
     <string name="cache_reader_files_summary">&#x4E34;&#x65F6; EPUB &#x548C; PDF &#x6587;&#x4EF6;</string>
+    <string name="cache_offline_books">离线书籍</string>
+    <string name="cache_offline_books_summary">保存后可离线阅读的书籍</string>
     <string name="cache_offline_catalog">&#x79BB;&#x7EBF;&#x4E66;&#x76EE;</string>
     <string name="cache_offline_catalog_summary">&#x7528;&#x4E8E;&#x79BB;&#x7EBF;&#x6D4F;&#x89C8;&#x7684;&#x56FE;&#x4E66;&#x6570;&#x636E;</string>
     <string name="cache_item_count">%1$d &#x4E2A;&#x9879;&#x76EE;</string>
@@ -96,6 +100,12 @@
     <string name="clear_cache_title">&#x6E05;&#x7406;&#x7F13;&#x5B58;&#xFF1F;</string>
     <string name="clear_cache_confirmation">&#x5C06;&#x5220;&#x9664;&#x5C01;&#x9762;&#x56FE;&#x7247;&#x3001;&#x9605;&#x8BFB;&#x5668;&#x6587;&#x4EF6;&#x3001;&#x79BB;&#x7EBF;&#x4E66;&#x76EE;&#x548C;&#x672C;&#x5730;&#x6279;&#x6CE8;&#x3002;&#x5F85;&#x540C;&#x6B65;&#x7684;&#x53D8;&#x66F4;&#x4F1A;&#x4FDD;&#x7559;&#x3002;</string>
     <string name="cache_cleared">&#x7F13;&#x5B58;&#x5DF2;&#x6E05;&#x7406;</string>
+    <string name="offline_reading">离线阅读</string>
+    <string name="downloaded_only">仅显示已下载</string>
+    <string name="download_in_progress">正在下载书籍……</string>
+    <string name="download_bytes">%1$s / %2$s</string>
+    <string name="remove_download">移除下载</string>
+    <string name="download_for_offline">下载以供离线阅读</string>
     <string name="theme_color">&#x4E3B;&#x9898;&#x8272;</string>
     <string name="theme_color_forest">&#x68EE;&#x6797;</string>
     <string name="theme_color_ocean">&#x6D77;&#x6D0B;</string>

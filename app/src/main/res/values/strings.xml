@@ -56,6 +56,8 @@
     <string name="status_updated">Reading status updated</string>
     <string name="rating_updated">Personal rating updated</string>
     <string name="shelves_updated">Shelves updated</string>
+    <string name="downloaded">Downloaded</string>
+    <string name="download_removed">Download removed</string>
     <string name="close">Close</string>
     <string name="navigation_libraries">Libraries</string>
     <string name="navigation_shelves">Shelves</string>
@@ -84,11 +86,13 @@
     <string name="content_description_open_cache">Open cache management</string>
     <string name="content_description_refresh_cache">Refresh cache size</string>
     <string name="cache_total_size">Total cache: %1$s</string>
-    <string name="cache_description">Clear temporary files and offline catalog data. Pending sync changes are kept.</string>
+    <string name="cache_description">Clear temporary files, offline books, and catalog data. Pending sync changes are kept.</string>
     <string name="cache_cover_images">Cover images</string>
     <string name="cache_cover_images_summary">Downloaded book covers</string>
     <string name="cache_reader_files">Reader files</string>
     <string name="cache_reader_files_summary">Temporary EPUB and PDF files</string>
+    <string name="cache_offline_books">Offline books</string>
+    <string name="cache_offline_books_summary">Books saved for offline reading</string>
     <string name="cache_offline_catalog">Offline catalog</string>
     <string name="cache_offline_catalog_summary">Books stored for offline browsing</string>
     <string name="cache_item_count">%1$d items</string>
@@ -96,6 +100,12 @@
     <string name="clear_cache_title">Clear cache?</string>
     <string name="clear_cache_confirmation">This removes cover images, reader files, offline catalog data, and local annotations. Pending sync changes will be kept.</string>
     <string name="cache_cleared">Cache cleared</string>
+    <string name="offline_reading">Offline reading</string>
+    <string name="downloaded_only">Downloaded only</string>
+    <string name="download_in_progress">Downloading book...</string>
+    <string name="download_bytes">%1$s / %2$s</string>
+    <string name="remove_download">Remove download</string>
+    <string name="download_for_offline">Download for offline</string>
     <string name="theme_color">Theme color</string>
     <string name="theme_color_forest">Forest</string>
     <string name="theme_color_ocean">Ocean</string>

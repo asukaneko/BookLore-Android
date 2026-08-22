@@ -11,6 +11,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.booklore.android.core.database.BookLoreDatabase
 import app.booklore.android.core.cache.CacheManager
 import app.booklore.android.core.network.BookLoreApi
+import app.booklore.android.core.offline.OfflineBookStore
 import app.booklore.android.core.security.SessionStore
 import app.booklore.android.feature.AppViewModel
 import app.booklore.android.sync.PendingSyncQueue
@@ -30,6 +31,7 @@ class MainActivity : ComponentActivity() {
                     database = database,
                     pendingSyncQueue = PendingSyncQueue(applicationContext, database),
                     cacheManager = CacheManager(applicationContext, database),
+                    offlineBookStore = OfflineBookStore(applicationContext),
                 ) as T
             }
         }

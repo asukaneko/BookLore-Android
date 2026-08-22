@@ -1,6 +1,7 @@
 package app.booklore.android.core.cache
 
 import android.content.Context
+import app.booklore.android.core.offline.OfflineBookStore
 import app.booklore.android.core.database.BookLoreDatabase
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -9,6 +10,7 @@ import kotlinx.coroutines.withContext
 enum class CacheBucketId {
     COVER_IMAGES,
     READER_FILES,
+    OFFLINE_BOOKS,
     OFFLINE_CATALOG,
 }
 
@@ -31,6 +33,7 @@ class CacheManager(
 ) {
     private val appContext = context.applicationContext
     private val readerCacheDirectory = File(appContext.filesDir, "reader-cache")
+    private val offlineBookStore = OfflineBookStore(appContext)
 
     suspend fun snapshot(): CacheSnapshot = withContext(Dispatchers.IO) {
         val bookCount = database.catalogDao().bookCount()
@@ -38,6 +41,9 @@ class CacheManager(
             buckets = listOf(
                 directoryBucket(CacheBucketId.COVER_IMAGES, appContext.cacheDir),
                 directoryBucket(CacheBucketId.READER_FILES, readerCacheDirectory),
+                offlineBookStore.snapshot().let { storage ->
+                    CacheBucket(CacheBucketId.OFFLINE_BOOKS, storage.bytes, storage.itemCount)
+                },
                 CacheBucket(
                     id = CacheBucketId.OFFLINE_CATALOG,
                     bytes = databaseFilesSize().takeIf { bookCount > 0 } ?: 0,
@@ -50,6 +56,7 @@ class CacheManager(
     suspend fun clear() = withContext(Dispatchers.IO) {
         clearDirectoryContents(appContext.cacheDir)
         readerCacheDirectory.deleteRecursively()
+        offlineBookStore.clear()
         database.catalogDao().clearCatalog()
         database.annotationDao().clear()
     }

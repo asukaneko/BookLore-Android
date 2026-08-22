@@ -92,6 +92,7 @@ import app.booklore.android.core.model.ANNOTATION_STYLE_HIGHLIGHT
 import app.booklore.android.core.model.ANNOTATION_STYLE_UNDERLINE
 import app.booklore.android.core.model.Annotation
 import app.booklore.android.core.model.Book
+import app.booklore.android.core.model.BookFile
 import app.booklore.android.core.model.CreateAnnotationRequest
 import app.booklore.android.core.model.EpubReaderSettings
 import app.booklore.android.core.model.EpubReaderTheme
@@ -100,6 +101,7 @@ import app.booklore.android.core.model.FontOption
 import app.booklore.android.core.model.PendingAnnotationUpdate
 import app.booklore.android.core.model.ThemeColorOption
 import app.booklore.android.core.model.UpdateAnnotationRequest
+import app.booklore.android.core.offline.OfflineBookStore
 import app.booklore.android.core.model.displayTitle
 import app.booklore.android.core.model.supportsEpubReader
 import app.booklore.android.core.model.toArgbColorOrNull
@@ -1242,8 +1244,15 @@ private class EpubReaderViewModel(
     private val api = BookLoreApi(sessionStore)
     private val database = BookLoreDatabase.get(application)
     private val pendingSyncQueue = PendingSyncQueue(application, database)
+    private val offlineBookStore = OfflineBookStore(application)
     private val readerDirectory = File(application.filesDir, "reader-cache")
     private val cacheFile = File(readerDirectory, "${args.bookId}-${args.bookFileId}.epub")
+    private val offlineFile = offlineBookStore.fileFor(
+        Book(
+            id = args.bookId,
+            primaryFile = BookFile(id = args.bookFileId, bookType = args.bookType, extension = "epub"),
+        ),
+    )
     private val sessionTracker = ReadingSessionTracker { report ->
         try {
             api.recordReadingSession(report)
@@ -1373,10 +1382,15 @@ private class EpubReaderViewModel(
         _state.value = EpubReaderUiState.Loading
         viewModelScope.launch(Dispatchers.IO) {
             // Reuse the previously downloaded copy when it is still readable.
-            val fromCache = cacheFile.exists() && cacheFile.hasZipSignature()
+            val fromOffline = offlineFile?.exists() == true && offlineFile.hasZipSignature()
+            val fromCache = !fromOffline && cacheFile.exists() && cacheFile.hasZipSignature()
             var usingStreaming = false
             try {
                 val asset = when {
+                    fromOffline -> {
+                        offlineFile!!.setLastModified(System.currentTimeMillis())
+                        assetRetriever.retrieve(offlineFile)
+                    }
                     fromCache -> {
                         cacheFile.setLastModified(System.currentTimeMillis())
                         assetRetriever.retrieve(cacheFile)
@@ -1416,6 +1430,11 @@ private class EpubReaderViewModel(
             } catch (error: Exception) {
                 publication?.close()
                 publication = null
+                if (fromOffline) {
+                    offlineFile?.delete()
+                    openPublication()
+                    return@launch
+                }
                 if (fromCache) {
                     // The cached copy turned out unreadable — drop it and download fresh once.
                     cacheFile.delete()

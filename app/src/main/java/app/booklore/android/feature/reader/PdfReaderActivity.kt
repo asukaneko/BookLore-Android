@@ -83,6 +83,8 @@ import app.booklore.android.core.model.Book
 import app.booklore.android.core.model.PdfPosition
 import app.booklore.android.core.model.PdfReaderSettings
 import app.booklore.android.core.model.PdfReadingMode
+import app.booklore.android.core.model.BookFile
+import app.booklore.android.core.offline.OfflineBookStore
 import app.booklore.android.core.model.displayTitle
 import app.booklore.android.core.model.supportsPdfReader
 import app.booklore.android.core.database.BookLoreDatabase
@@ -629,8 +631,15 @@ private class PdfReaderViewModel(
     private val sessionStore = SessionStore(application)
     private val api = BookLoreApi(sessionStore)
     private val pendingSyncQueue = PendingSyncQueue(application, BookLoreDatabase.get(application))
+    private val offlineBookStore = OfflineBookStore(application)
     private val readerDirectory = File(application.filesDir, "reader-cache")
     private val cacheFile = File(readerDirectory, "${args.bookId}-${args.bookFileId}.pdf")
+    private val offlineFile = offlineBookStore.fileFor(
+        Book(
+            id = args.bookId,
+            primaryFile = BookFile(id = args.bookFileId, bookType = args.bookType, extension = "pdf"),
+        ),
+    )
     private val streamFile = File(readerDirectory, "${args.bookId}-${args.bookFileId}.pdf.streaming")
     private val sessionTracker = ReadingSessionTracker { report ->
         try {
@@ -734,8 +743,13 @@ private class PdfReaderViewModel(
                 val pageCount = withContext(rendererDispatcher) {
                     closeRenderer()
                     // Reuse the previously downloaded copy when it is still readable.
-                    fromCache = cacheFile.exists() && cacheFile.hasPdfSignature()
+                    val fromOffline = offlineFile?.exists() == true && offlineFile.hasPdfSignature()
+                    fromCache = !fromOffline && cacheFile.exists() && cacheFile.hasPdfSignature()
                     val newDescriptor = when {
+                        fromOffline -> {
+                            offlineFile!!.setLastModified(System.currentTimeMillis())
+                            ParcelFileDescriptor.open(offlineFile, ParcelFileDescriptor.MODE_READ_ONLY)
+                        }
                         fromCache -> {
                             cacheFile.setLastModified(System.currentTimeMillis())
                             ParcelFileDescriptor.open(cacheFile, ParcelFileDescriptor.MODE_READ_ONLY)
@@ -782,6 +796,11 @@ private class PdfReaderViewModel(
                 if (usingStreaming) cacheBookInBackground()
             } catch (error: Exception) {
                 withContext(rendererDispatcher) { closeRenderer() }
+                if (offlineFile?.exists() == true && !fromCache) {
+                    offlineFile.delete()
+                    openDocument()
+                    return@launch
+                }
                 if (fromCache) {
                     // The cached copy turned out unreadable — drop it and download fresh once.
                     cacheFile.delete()
