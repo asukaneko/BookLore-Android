@@ -281,4 +281,6 @@
     <string name="statistics_reading_clock">Reading clock</string>
     <string name="statistics_started_books">Books started</string>
     <string name="cancel">Cancel</string>
+    <string name="filter_action">Filters</string>
+    <string name="filter_title">Filters</string>
 </resources>

@@ -14,7 +14,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -29,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -68,6 +68,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CollectionsBookmark
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Refresh
@@ -88,6 +89,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
@@ -123,7 +125,6 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -299,19 +300,7 @@ fun BookLoreApp(viewModel: AppViewModel) {
             }
             if (selectedBook != null) {
                 Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(Unit) {
-                            awaitEachGesture {
-                                // Consume every event of the gesture so touches on
-                                // the overlay never leak into the catalog below.
-                                while (true) {
-                                    val event = awaitPointerEvent()
-                                    event.changes.forEach { it.consume() }
-                                    if (event.changes.none { it.pressed }) break
-                                }
-                            }
-                        },
+                    modifier = Modifier.fillMaxSize(),
                 ) {
                     if (readerOpen) {
                         ReaderPreparationScreen(
@@ -2832,6 +2821,7 @@ private fun LibraryCatalog(
     var selectedLibraryId by rememberSaveable { mutableStateOf<Long?>(null) }
     var selectedShelfId by rememberSaveable { mutableStateOf<Long?>(null) }
     var downloadedOnly by rememberSaveable { mutableStateOf(false) }
+    var filtersOpen by rememberSaveable { mutableStateOf(false) }
     // Restore the persisted sort selection; write back on every change.
     val context = LocalContext.current
     val sessionStore = remember { SessionStore(context.applicationContext) }
@@ -2865,56 +2855,156 @@ private fun LibraryCatalog(
         pageTitleAlpha = pageTitleAlpha,
         compactBookGrid = compactBookGrid,
         filters = {
-            if (libraries.isNotEmpty()) {
-                CatalogFilterGroup(
-                    icon = Icons.AutoMirrored.Filled.LibraryBooks,
-                    title = stringResource(R.string.libraries),
-                ) {
-                    FilterRow(
-                        selectedId = selectedLibraryId,
-                        allLabel = stringResource(R.string.filter_all),
-                        items = libraries.map { it.id to it.name },
-                        onSelected = { selectedLibraryId = it },
-                    )
-                }
-            }
-            if (shelves.isNotEmpty()) {
-                CatalogFilterGroup(
-                    icon = Icons.Filled.CollectionsBookmark,
-                    title = stringResource(R.string.shelves),
-                ) {
-                    FilterRow(
-                        selectedId = selectedShelfId,
-                        allLabel = stringResource(R.string.filter_all),
-                        items = shelves.map { it.id to it.name },
-                        onSelected = { selectedShelfId = it },
-                    )
-                }
-            }
-            CatalogFilterGroup(
-                icon = Icons.Filled.Download,
-                title = stringResource(R.string.offline_reading),
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.End,
             ) {
-                FilterChip(
-                    selected = downloadedOnly,
-                    onClick = { downloadedOnly = !downloadedOnly },
-                    label = { Text(stringResource(R.string.downloaded_only)) },
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                )
-            }
-            CatalogFilterGroup(
-                icon = Icons.AutoMirrored.Filled.Sort,
-                title = stringResource(R.string.filter_sort),
-            ) {
-                SortChipRow(
-                    selected = sortOption,
-                    ascending = sortAscending,
-                    onSelected = { sortOption = it },
-                    onToggleOrder = { sortAscending = !sortAscending },
-                )
+                OutlinedButton(onClick = { filtersOpen = true }) {
+                    Icon(Icons.Filled.FilterList, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.filter_action))
+                }
             }
         },
     )
+
+    if (filtersOpen) {
+        LibraryFilterSheet(
+            libraries = libraries,
+            shelves = shelves,
+            selectedLibraryId = selectedLibraryId,
+            onLibrarySelected = { selectedLibraryId = it },
+            selectedShelfId = selectedShelfId,
+            onShelfSelected = { selectedShelfId = it },
+            downloadedOnly = downloadedOnly,
+            onDownloadedOnlyChange = { downloadedOnly = it },
+            sortOption = sortOption,
+            onSortSelected = { sortOption = it },
+            sortAscending = sortAscending,
+            onToggleSortOrder = { sortAscending = !sortAscending },
+            onReset = {
+                selectedLibraryId = null
+                selectedShelfId = null
+                downloadedOnly = false
+                sortOption = BookSortOption.DEFAULT
+                sortAscending = true
+            },
+            onDismiss = { filtersOpen = false },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LibraryFilterSheet(
+    libraries: List<Library>,
+    shelves: List<Shelf>,
+    selectedLibraryId: Long?,
+    onLibrarySelected: (Long?) -> Unit,
+    selectedShelfId: Long?,
+    onShelfSelected: (Long?) -> Unit,
+    downloadedOnly: Boolean,
+    onDownloadedOnlyChange: (Boolean) -> Unit,
+    sortOption: BookSortOption,
+    onSortSelected: (BookSortOption) -> Unit,
+    sortAscending: Boolean,
+    onToggleSortOrder: () -> Unit,
+    onReset: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth().navigationBarsPadding(),
+            contentPadding = PaddingValues(bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = stringResource(R.string.filter_title),
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = PageTitleFontWeight,
+                    )
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.close))
+                    }
+                }
+            }
+            if (libraries.isNotEmpty()) {
+                item {
+                    CatalogFilterGroup(
+                        icon = Icons.AutoMirrored.Filled.LibraryBooks,
+                        title = stringResource(R.string.libraries),
+                    ) {
+                        FilterRow(
+                            selectedId = selectedLibraryId,
+                            allLabel = stringResource(R.string.filter_all),
+                            items = libraries.map { it.id to it.name },
+                            onSelected = onLibrarySelected,
+                        )
+                    }
+                }
+            }
+            if (shelves.isNotEmpty()) {
+                item {
+                    CatalogFilterGroup(
+                        icon = Icons.Filled.CollectionsBookmark,
+                        title = stringResource(R.string.shelves),
+                    ) {
+                        FilterRow(
+                            selectedId = selectedShelfId,
+                            allLabel = stringResource(R.string.filter_all),
+                            items = shelves.map { it.id to it.name },
+                            onSelected = onShelfSelected,
+                        )
+                    }
+                }
+            }
+            item {
+                CatalogFilterGroup(
+                    icon = Icons.Filled.Download,
+                    title = stringResource(R.string.offline_reading),
+                ) {
+                    FilterChip(
+                        selected = downloadedOnly,
+                        onClick = { onDownloadedOnlyChange(!downloadedOnly) },
+                        label = { Text(stringResource(R.string.downloaded_only)) },
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                }
+            }
+            item {
+                CatalogFilterGroup(
+                    icon = Icons.AutoMirrored.Filled.Sort,
+                    title = stringResource(R.string.filter_sort),
+                ) {
+                    SortChipRow(
+                        selected = sortOption,
+                        ascending = sortAscending,
+                        onSelected = onSortSelected,
+                        onToggleOrder = onToggleSortOrder,
+                    )
+                }
+            }
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    OutlinedButton(onClick = onReset, modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.reset_filters))
+                    }
+                    Button(onClick = onDismiss, modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.close))
+                    }
+                }
+            }
+        }
+    }
 }
 
 /**
@@ -3149,14 +3239,16 @@ private fun BookDetailScreen(
             )
         },
     ) { padding ->
-        if (isLoading) {
-            LoadingState(Modifier.padding(padding))
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = PaddingValues(20.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            if (isLoading) {
+                item {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+            }
                 item {
                     Row(verticalAlignment = Alignment.Top) {
                         BookCover(
@@ -3231,7 +3323,6 @@ private fun BookDetailScreen(
                 }
             }
         }
-    }
 }
 
 @Composable

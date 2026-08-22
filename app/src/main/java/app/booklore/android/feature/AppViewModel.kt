@@ -171,12 +171,19 @@ class AppViewModel(
     }
 
     fun selectBook(bookId: Long) = runRequest {
-        _state.update { it.copy(bookDetail = null, isDetailLoading = true, error = null) }
+        val cachedBook = _state.value.books.firstOrNull { it.id == bookId }
+        _state.update {
+            it.copy(
+                bookDetail = cachedBook,
+                isDetailLoading = true,
+                error = null,
+            )
+        }
         val book = try {
             io { api.book(bookId) }
         } catch (error: NetworkException) {
             // Offline: fall back to the cached book summary (no full description).
-            _state.value.books.firstOrNull { it.id == bookId } ?: throw error
+            cachedBook ?: throw error
         }
         _state.update { it.copy(bookDetail = book, isDetailLoading = false) }
     }
