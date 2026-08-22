@@ -1,0 +1,47 @@
+# Local agent instructions and private project notes
+AGENTS.md
+docs/
+
+# Gradle and Android build output
+.gradle/
+**/build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Kotlin tooling and generated metadata
+.kotlin/
+
+# Android Studio and IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Local machine configuration
+local.properties
+release.properties
+*.local
+
+# Signing keys and certificates
+*.jks
+*.keystore
+*.p12
+*.pem
+
+# Packaged and generated binaries
+*.apk
+*.aab
+*.aar
+
+# Environment files and local secrets
+.env
+.env.*
+!.env.example
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Keep the Gradle Wrapper required for reproducible public builds
+!gradle/wrapper/gradle-wrapper.jar

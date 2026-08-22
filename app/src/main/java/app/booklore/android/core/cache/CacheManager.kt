@@ -1,0 +1,78 @@
+package app.booklore.android.core.cache
+
+import android.content.Context
+import app.booklore.android.core.database.BookLoreDatabase
+import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+enum class CacheBucketId {
+    COVER_IMAGES,
+    READER_FILES,
+    OFFLINE_CATALOG,
+}
+
+data class CacheBucket(
+    val id: CacheBucketId,
+    val bytes: Long = 0,
+    val itemCount: Int = 0,
+)
+
+data class CacheSnapshot(
+    val buckets: List<CacheBucket> = emptyList(),
+) {
+    val totalBytes: Long get() = buckets.sumOf(CacheBucket::bytes)
+}
+
+/** Reads and clears the account-scoped data that can be safely recreated. */
+class CacheManager(
+    context: Context,
+    private val database: BookLoreDatabase,
+) {
+    private val appContext = context.applicationContext
+    private val readerCacheDirectory = File(appContext.filesDir, "reader-cache")
+
+    suspend fun snapshot(): CacheSnapshot = withContext(Dispatchers.IO) {
+        val bookCount = database.catalogDao().bookCount()
+        CacheSnapshot(
+            buckets = listOf(
+                directoryBucket(CacheBucketId.COVER_IMAGES, appContext.cacheDir),
+                directoryBucket(CacheBucketId.READER_FILES, readerCacheDirectory),
+                CacheBucket(
+                    id = CacheBucketId.OFFLINE_CATALOG,
+                    bytes = databaseFilesSize().takeIf { bookCount > 0 } ?: 0,
+                    itemCount = bookCount,
+                ),
+            ),
+        )
+    }
+
+    suspend fun clear() = withContext(Dispatchers.IO) {
+        clearDirectoryContents(appContext.cacheDir)
+        readerCacheDirectory.deleteRecursively()
+        database.catalogDao().clearCatalog()
+        database.annotationDao().clear()
+    }
+
+    private fun directoryBucket(id: CacheBucketId, directory: File): CacheBucket {
+        val files = directory.walkTopDown().filter(File::isFile).toList()
+        return CacheBucket(id = id, bytes = files.sumOf(File::length), itemCount = files.size)
+    }
+
+    private fun databaseFilesSize(): Long {
+        val databaseFile = appContext.getDatabasePath(DATABASE_NAME)
+        return sequenceOf(
+            databaseFile,
+            File("${databaseFile.path}-wal"),
+            File("${databaseFile.path}-shm"),
+        ).filter(File::exists).sumOf(File::length)
+    }
+
+    private fun clearDirectoryContents(directory: File) {
+        directory.listFiles()?.forEach { it.deleteRecursively() }
+    }
+
+    private companion object {
+        const val DATABASE_NAME = "booklore.db"
+    }
+}
