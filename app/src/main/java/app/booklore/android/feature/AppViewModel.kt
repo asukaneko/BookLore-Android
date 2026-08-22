@@ -23,14 +23,17 @@ import app.booklore.android.core.network.ApiException
 import app.booklore.android.core.network.BookLoreApi
 import app.booklore.android.core.network.NetworkException
 import app.booklore.android.core.offline.OfflineBookStore
+import app.booklore.android.core.offline.OfflineDownloadQueue
+import app.booklore.android.core.offline.OfflineDownloadStatus
+import app.booklore.android.core.offline.OfflineDownloadTask
+import app.booklore.android.core.offline.toModel
 import app.booklore.android.core.security.SessionStore
 import app.booklore.android.sync.PendingSyncQueue
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -43,12 +46,25 @@ class AppViewModel(
     private val pendingSyncQueue: PendingSyncQueue,
     private val cacheManager: CacheManager,
     private val offlineBookStore: OfflineBookStore,
+    private val offlineDownloadQueue: OfflineDownloadQueue,
 ) : ViewModel() {
     private val _state = MutableStateFlow(newUiState())
     val state: StateFlow<AppUiState> = _state.asStateFlow()
-    private val downloadJobs = mutableMapOf<Long, Job>()
 
     init {
+        viewModelScope.launch {
+            offlineDownloadQueue.observeTasks().collect { entities ->
+                val tasks = entities.map { it.toModel() }
+                _state.update {
+                    it.copy(
+                        offlineDownloadTasks = tasks,
+                        downloadedBookIds = it.downloadedBookIds + tasks
+                            .filter { task -> task.status == OfflineDownloadStatus.COMPLETED }
+                            .map(OfflineDownloadTask::bookId),
+                    )
+                }
+            }
+        }
         if (sessionStore.read() != null) {
             // Opportunistically flush any progress queued while offline.
             pendingSyncQueue.schedule()
@@ -262,59 +278,54 @@ class AppViewModel(
 
     /** Downloads a supported book into durable private storage for offline reading. */
     fun downloadBook(book: Book) {
-        if (offlineBookStore.isDownloaded(book) || downloadJobs[book.id]?.isActive == true) return
-        val file = book.primaryFile ?: return
-        if (file.id == null || (!book.supportsEpubReader() && !book.supportsPdfReader())) return
-        val job = viewModelScope.launch(Dispatchers.IO) {
-            _state.update {
-                it.copy(
-                    offlineDownloadStates = it.offlineDownloadStates + (book.id to OfflineDownloadState()),
-                    error = null,
-                    notice = null,
-                )
-            }
-            try {
-                offlineBookStore.download(api, book) { bytesRead, totalBytes ->
-                    val progress = totalBytes?.takeIf { it > 0L }?.let { bytesRead.toFloat() / it }
-                    _state.update {
-                        it.copy(
-                            offlineDownloadStates = it.offlineDownloadStates + (
-                                book.id to OfflineDownloadState(
-                                    progress = progress?.coerceIn(0f, 1f),
-                                    bytesRead = bytesRead,
-                                    totalBytes = totalBytes,
-                                )
-                            ),
-                        )
-                    }
-                }
-                _state.update {
-                    it.copy(
-                        downloadedBookIds = it.downloadedBookIds + book.id,
-                        offlineDownloadStates = it.offlineDownloadStates - book.id,
-                        notice = Notice.Downloaded,
-                    )
-                }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                _state.update {
-                    it.copy(
-                        offlineDownloadStates = it.offlineDownloadStates - book.id,
-                        error = error.toUiError(),
-                    )
-                }
-            } finally {
-                downloadJobs.remove(book.id)
-            }
+        if (offlineBookStore.isDownloaded(book)) return
+        if (book.primaryFile?.id == null || (!book.supportsEpubReader() && !book.supportsPdfReader())) return
+        viewModelScope.launch {
+            runCatching { offlineDownloadQueue.enqueue(book) }
+                .onFailure { error -> _state.update { it.copy(error = (error as? Exception ?: Exception(error)).toUiError()) } }
         }
-        downloadJobs[book.id] = job
+    }
+
+    fun cancelDownload(book: Book) {
+        val task = _state.value.offlineDownloadTasks.firstOrNull { it.bookId == book.id } ?: return
+        cancelDownload(task)
+    }
+
+    fun cancelDownload(task: OfflineDownloadTask) {
+        viewModelScope.launch {
+            runCatching { offlineDownloadQueue.cancel(task) }
+                .onFailure { error -> _state.update { it.copy(error = (error as? Exception ?: Exception(error)).toUiError()) } }
+        }
+    }
+
+    fun retryDownload(book: Book) {
+        val task = _state.value.offlineDownloadTasks.firstOrNull { it.bookId == book.id }
+        if (task == null) downloadBook(book) else retryDownload(task)
+    }
+
+    fun retryDownload(task: OfflineDownloadTask) {
+        viewModelScope.launch {
+            runCatching { offlineDownloadQueue.retry(task) }
+                .onFailure { error -> _state.update { it.copy(error = (error as? Exception ?: Exception(error)).toUiError()) } }
+        }
     }
 
     fun deleteDownloadedBook(book: Book) {
+        val task = _state.value.offlineDownloadTasks.firstOrNull { it.bookId == book.id }
+        if (task != null) {
+            deleteDownloadedTask(task)
+            return
+        }
         viewModelScope.launch {
             io { offlineBookStore.delete(book) }
             _state.update { it.copy(downloadedBookIds = it.downloadedBookIds - book.id, notice = Notice.DownloadDeleted) }
+        }
+    }
+
+    fun deleteDownloadedTask(task: OfflineDownloadTask) {
+        viewModelScope.launch {
+            io { offlineDownloadQueue.delete(task) }
+            _state.update { it.copy(downloadedBookIds = it.downloadedBookIds - task.bookId, notice = Notice.DownloadDeleted) }
         }
     }
 
@@ -357,6 +368,7 @@ class AppViewModel(
     fun clearCache() {
         runRequest {
             _state.update { it.copy(isCacheLoading = true, error = null, notice = null) }
+            io { offlineDownloadQueue.clear() }
             io { cacheManager.clear() }
             val snapshot = io { cacheManager.snapshot() }
             _state.update {
@@ -367,7 +379,6 @@ class AppViewModel(
                     bookDetail = null,
                     offline = false,
                     downloadedBookIds = emptySet(),
-                    offlineDownloadStates = emptyMap(),
                     cacheSnapshot = snapshot,
                     isCacheLoading = false,
                     notice = Notice.CacheCleared,
@@ -395,8 +406,7 @@ class AppViewModel(
 
     fun signOut() = runRequest {
         _state.update { it.copy(isBusy = true, error = null) }
-        downloadJobs.values.forEach(Job::cancel)
-        downloadJobs.clear()
+        io { offlineDownloadQueue.clear() }
         io { api.logout() }
         io { pendingSyncQueue.clear() }
         io { database.catalogDao().clearCatalog() }
@@ -519,12 +529,6 @@ data class SyncStatus(
     val lastSyncTimeMs: Long? = null,
 )
 
-data class OfflineDownloadState(
-    val progress: Float? = null,
-    val bytesRead: Long = 0L,
-    val totalBytes: Long? = null,
-)
-
 data class AppUiState(
     val isBusy: Boolean = false,
     val isActionRunning: Boolean = false,
@@ -550,7 +554,7 @@ data class AppUiState(
     val error: UiError? = null,
     val notice: Notice? = null,
     val downloadedBookIds: Set<Long> = emptySet(),
-    val offlineDownloadStates: Map<Long, OfflineDownloadState> = emptyMap(),
+    val offlineDownloadTasks: List<OfflineDownloadTask> = emptyList(),
 )
 
 sealed interface UiError {

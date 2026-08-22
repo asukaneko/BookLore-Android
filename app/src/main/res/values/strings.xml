@@ -283,4 +283,11 @@
     <string name="cancel">Cancel</string>
     <string name="filter_action">Filters</string>
     <string name="filter_title">Filters</string>
+    <string name="offline_downloads">Offline downloads</string>
+    <string name="download_queue_empty">No offline download tasks.</string>
+    <string name="download_queued">Waiting for a connection</string>
+    <string name="download_failed">Download failed</string>
+    <string name="download_cancelled">Download cancelled</string>
+    <string name="cancel_download">Cancel download</string>
+    <string name="retry_download">Retry download</string>
 </resources>

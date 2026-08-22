@@ -158,10 +158,11 @@ import app.booklore.android.core.model.formatName
 import app.booklore.android.core.model.supportsEpubReader
 import app.booklore.android.core.model.supportsPdfReader
 import app.booklore.android.core.network.BookLoreApi
+import app.booklore.android.core.offline.OfflineDownloadStatus
+import app.booklore.android.core.offline.OfflineDownloadTask
 import app.booklore.android.core.security.SessionStore
 import app.booklore.android.feature.AppUiState
 import app.booklore.android.feature.AppViewModel
-import app.booklore.android.feature.OfflineDownloadState
 import app.booklore.android.feature.Notice
 import app.booklore.android.feature.SyncStatus
 import app.booklore.android.feature.UiError
@@ -188,6 +189,7 @@ import kotlinx.coroutines.withContext
 private val InputFieldShape = RoundedCornerShape(12.dp)
 private val TitleTransitionDistance = 72.dp
 private val PageTitleFontWeight = FontWeight.SemiBold
+private const val MAX_VISIBLE_DOWNLOAD_TASKS = 20
 private const val ToolbarTitleFadeStart = 0.78f
 private const val MIN_FONT_SCALE = 0.85f
 private const val MAX_FONT_SCALE = 1.30f
@@ -288,6 +290,9 @@ fun BookLoreApp(viewModel: AppViewModel) {
                     onSignOut = viewModel::signOut,
                     onRefreshSyncStatus = viewModel::refreshSyncStatus,
                     onSyncNow = viewModel::syncNow,
+                    onCancelDownload = viewModel::cancelDownload,
+                    onRetryDownload = viewModel::retryDownload,
+                    onDeleteDownload = viewModel::deleteDownloadedTask,
                     onRefreshCache = viewModel::refreshCache,
                     onClearCache = viewModel::clearCache,
                     onRefreshStatistics = viewModel::refreshStatistics,
@@ -316,12 +321,14 @@ fun BookLoreApp(viewModel: AppViewModel) {
                             isActionRunning = state.isActionRunning,
                             shelves = state.shelves,
                             isOfflineAvailable = selectedBook.id in state.downloadedBookIds,
-                            offlineDownloadState = state.offlineDownloadStates[selectedBook.id],
+                            offlineDownloadTask = state.offlineDownloadTasks.firstOrNull { it.bookId == selectedBook.id },
                             onBack = viewModel::clearBookSelection,
                             onUpdateStatus = viewModel::updateReadStatus,
                             onUpdateRating = viewModel::updatePersonalRating,
                             onAssignShelves = viewModel::assignShelves,
                             onDownload = viewModel::downloadBook,
+                            onCancelDownload = viewModel::cancelDownload,
+                            onRetryDownload = viewModel::retryDownload,
                             onDeleteDownload = viewModel::deleteDownloadedBook,
                             onOpenReader = {
                                 if (selectedBook.supportsEpubReader()) {
@@ -613,6 +620,9 @@ private fun CatalogScreen(
     onSignOut: () -> Unit,
     onRefreshSyncStatus: () -> Unit,
     onSyncNow: () -> Unit,
+    onCancelDownload: (OfflineDownloadTask) -> Unit,
+    onRetryDownload: (OfflineDownloadTask) -> Unit,
+    onDeleteDownload: (OfflineDownloadTask) -> Unit,
     onRefreshCache: () -> Unit,
     onClearCache: () -> Unit,
     onRefreshStatistics: (Int) -> Unit,
@@ -860,6 +870,10 @@ private fun CatalogScreen(
                                     onSignOut = onSignOut,
                                     onRefreshSyncStatus = onRefreshSyncStatus,
                                     onSyncNow = onSyncNow,
+                                    offlineDownloadTasks = state.offlineDownloadTasks,
+                                    onCancelDownload = onCancelDownload,
+                                    onRetryDownload = onRetryDownload,
+                                    onDeleteDownload = onDeleteDownload,
                                     onOpenCache = { cacheOpen = true },
                                     gridState = settingsGridState,
                                     pageTitle = stringResource(R.string.settings),
@@ -3215,12 +3229,14 @@ private fun BookDetailScreen(
     isActionRunning: Boolean,
     shelves: List<Shelf>,
     isOfflineAvailable: Boolean,
-    offlineDownloadState: OfflineDownloadState?,
+    offlineDownloadTask: OfflineDownloadTask?,
     onBack: () -> Unit,
     onUpdateStatus: (Long, String) -> Unit,
     onUpdateRating: (Long, Int) -> Unit,
     onAssignShelves: (Long, Set<Long>, Set<Long>) -> Unit,
     onDownload: (Book) -> Unit,
+    onCancelDownload: (Book) -> Unit,
+    onRetryDownload: (Book) -> Unit,
     onDeleteDownload: (Book) -> Unit,
     onOpenReader: () -> Unit,
     coverUrl: String?,
@@ -3303,9 +3319,11 @@ private fun BookDetailScreen(
                     item {
                         OfflineDownloadControl(
                             isDownloaded = isOfflineAvailable,
-                            downloadState = offlineDownloadState,
+                            downloadTask = offlineDownloadTask,
                             enabled = !isActionRunning,
                             onDownload = { onDownload(book) },
+                            onCancel = { onCancelDownload(book) },
+                            onRetry = { onRetryDownload(book) },
                             onDelete = { onDeleteDownload(book) },
                         )
                     }
@@ -3421,12 +3439,16 @@ private fun SettingsCatalog(
     serverUrl: String?,
     compactBookGrid: Boolean,
     syncStatus: SyncStatus,
+    offlineDownloadTasks: List<OfflineDownloadTask>,
     onCompactBookGridChanged: (Boolean) -> Unit,
     onOpenAppearanceEditor: () -> Unit,
     onOpenCache: () -> Unit,
     onSignOut: () -> Unit,
     onRefreshSyncStatus: () -> Unit,
     onSyncNow: () -> Unit,
+    onCancelDownload: (OfflineDownloadTask) -> Unit,
+    onRetryDownload: (OfflineDownloadTask) -> Unit,
+    onDeleteDownload: (OfflineDownloadTask) -> Unit,
     gridState: LazyGridState,
     pageTitle: String,
     pageTitleAlpha: Float,
@@ -3518,6 +3540,28 @@ private fun SettingsCatalog(
                     )
                 }
                 HorizontalDivider()
+                Text(
+                    stringResource(R.string.offline_downloads),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = PageTitleFontWeight,
+                )
+                if (offlineDownloadTasks.isEmpty()) {
+                    Text(
+                        stringResource(R.string.download_queue_empty),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    offlineDownloadTasks.take(MAX_VISIBLE_DOWNLOAD_TASKS).forEach { task ->
+                        OfflineDownloadTaskRow(
+                            task = task,
+                            onCancel = { onCancelDownload(task) },
+                            onRetry = { onRetryDownload(task) },
+                            onDelete = { onDeleteDownload(task) },
+                        )
+                    }
+                }
+                HorizontalDivider()
                 Text(stringResource(R.string.display), style = MaterialTheme.typography.titleMedium, fontWeight = PageTitleFontWeight)
                 Row(
                     modifier = Modifier
@@ -3562,28 +3606,113 @@ private fun SettingsCatalog(
 }
 
 @Composable
+private fun OfflineDownloadTaskRow(
+    task: OfflineDownloadTask,
+    onCancel: () -> Unit,
+    onRetry: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = task.bookTitle,
+            style = MaterialTheme.typography.bodyLarge,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = task.downloadStatusLabel(),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        task.progress?.let { progress ->
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            task.totalBytes?.let { total ->
+                Text(
+                    stringResource(R.string.download_bytes, formatCacheSize(task.bytesRead), formatCacheSize(total)),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            when (task.status) {
+                OfflineDownloadStatus.PENDING,
+                OfflineDownloadStatus.DOWNLOADING,
+                -> OutlinedButton(onClick = onCancel) {
+                    Icon(Icons.Filled.Close, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.cancel_download))
+                }
+                OfflineDownloadStatus.FAILED,
+                OfflineDownloadStatus.CANCELLED,
+                -> OutlinedButton(onClick = onRetry) {
+                    Icon(Icons.Filled.Refresh, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.retry_download))
+                }
+                OfflineDownloadStatus.COMPLETED -> OutlinedButton(onClick = onDelete) {
+                    Icon(Icons.Filled.DeleteSweep, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.remove_download))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OfflineDownloadTask.downloadStatusLabel(): String = when (status) {
+    OfflineDownloadStatus.PENDING -> stringResource(R.string.download_queued)
+    OfflineDownloadStatus.DOWNLOADING -> stringResource(R.string.download_in_progress)
+    OfflineDownloadStatus.COMPLETED -> stringResource(R.string.downloaded)
+    OfflineDownloadStatus.FAILED -> stringResource(R.string.download_failed)
+    OfflineDownloadStatus.CANCELLED -> stringResource(R.string.download_cancelled)
+}
+
+@Composable
 private fun OfflineDownloadControl(
     isDownloaded: Boolean,
-    downloadState: OfflineDownloadState?,
+    downloadTask: OfflineDownloadTask?,
     enabled: Boolean,
     onDownload: () -> Unit,
+    onCancel: () -> Unit,
+    onRetry: () -> Unit,
     onDelete: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(stringResource(R.string.offline_reading), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         when {
-            downloadState != null -> {
-                Text(stringResource(R.string.download_in_progress), style = MaterialTheme.typography.bodyMedium)
+            downloadTask?.isActive == true -> {
+                Text(downloadTask.downloadStatusLabel(), style = MaterialTheme.typography.bodyMedium)
                 LinearProgressIndicator(
-                    progress = { downloadState.progress ?: 0f },
+                    progress = { downloadTask.progress ?: 0f },
                     modifier = Modifier.fillMaxWidth(),
                 )
-                downloadState.totalBytes?.let { total ->
+                downloadTask.totalBytes?.let { total ->
                     Text(
-                        stringResource(R.string.download_bytes, formatCacheSize(downloadState.bytesRead), formatCacheSize(total)),
+                        stringResource(R.string.download_bytes, formatCacheSize(downloadTask.bytesRead), formatCacheSize(total)),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+                OutlinedButton(onClick = onCancel, enabled = enabled) {
+                    Icon(Icons.Filled.Close, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.cancel_download))
+                }
+            }
+            downloadTask != null && (
+                downloadTask.status == OfflineDownloadStatus.FAILED ||
+                    downloadTask.status == OfflineDownloadStatus.CANCELLED
+                ) -> {
+                Text(downloadTask.downloadStatusLabel(), style = MaterialTheme.typography.bodyMedium)
+                OutlinedButton(onClick = onRetry, enabled = enabled) {
+                    Icon(Icons.Filled.Refresh, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.retry_download))
                 }
             }
             isDownloaded -> {

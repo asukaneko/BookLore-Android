@@ -2,7 +2,6 @@ package app.booklore.android.core.offline
 
 import android.content.Context
 import app.booklore.android.core.model.Book
-import app.booklore.android.core.model.BookFile
 import app.booklore.android.core.model.supportsEpubReader
 import app.booklore.android.core.model.supportsPdfReader
 import app.booklore.android.core.network.BookLoreApi
@@ -17,11 +16,15 @@ class OfflineBookStore(context: Context) {
     fun fileFor(book: Book): File? {
         val bookFile = book.primaryFile ?: return null
         val fileId = bookFile.id ?: return null
-        val extension = bookFile.offlineExtension() ?: return null
-        return File(directory, "${book.id}-$fileId.$extension")
+        return fileFor(book.id, fileId, bookFile.bookType ?: bookFile.extension.orEmpty())
     }
 
-    fun isDownloaded(book: Book): Boolean = fileFor(book)?.isValidOfflineFile() == true
+    fun fileFor(bookId: Long, bookFileId: Long, bookType: String): File? {
+        val extension = bookType.offlineExtension() ?: return null
+        return File(directory, "${bookId}-${bookFileId}.$extension")
+    }
+
+    fun isDownloaded(book: Book): Boolean = fileFor(book)?.isValidFile() == true
 
     fun downloadedBookIds(books: List<Book>): Set<Long> = books
         .filter(::isDownloaded)
@@ -39,13 +42,17 @@ class OfflineBookStore(context: Context) {
             book.supportsPdfReader() -> api.downloadPdf(book.id, bookFile.bookType ?: "PDF", destination, onProgress)
             else -> error("Book format is not supported for offline reading")
         }
-        require(destination.isValidOfflineFile()) { "The downloaded book is invalid" }
+        require(destination.isValidFile()) { "The downloaded book is invalid" }
         destination.setLastModified(System.currentTimeMillis())
         destination
     }
 
     suspend fun delete(book: Book) = withContext(Dispatchers.IO) {
-        fileFor(book)?.delete()
+        fileFor(book)?.let(::deleteFiles)
+    }
+
+    suspend fun delete(bookId: Long, bookFileId: Long, bookType: String) = withContext(Dispatchers.IO) {
+        fileFor(bookId, bookFileId, bookType)?.let(::deleteFiles)
     }
 
     suspend fun clear() = withContext(Dispatchers.IO) {
@@ -57,18 +64,25 @@ class OfflineBookStore(context: Context) {
         ?.let { files ->
             OfflineBookStorage(
                 bytes = files.sumOf(File::length),
-                itemCount = files.count { it.isValidOfflineFile() },
+                itemCount = files.count { it.isValidFile() },
             )
         }
         ?: OfflineBookStorage()
 
-    private fun BookFile.offlineExtension(): String? = when {
-        bookType.equals("EPUB", ignoreCase = true) || extension.equals("epub", ignoreCase = true) -> "epub"
-        bookType.equals("PDF", ignoreCase = true) || extension.equals("pdf", ignoreCase = true) -> "pdf"
+    fun isValidOfflineFile(file: File): Boolean = file.isValidFile()
+
+    private fun deleteFiles(file: File) {
+        file.delete()
+        File(file.parentFile, "${file.name}.part").delete()
+    }
+
+    private fun String.offlineExtension(): String? = when {
+        equals("EPUB", ignoreCase = true) || equals("epub", ignoreCase = true) -> "epub"
+        equals("PDF", ignoreCase = true) || equals("pdf", ignoreCase = true) -> "pdf"
         else -> null
     }
 
-    private fun File.isValidOfflineFile(): Boolean {
+    private fun File.isValidFile(): Boolean {
         if (!isFile || length() < 4L) return false
         return runCatching {
             inputStream().buffered().use { input ->

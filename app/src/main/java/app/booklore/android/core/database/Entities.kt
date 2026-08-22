@@ -75,3 +75,22 @@ data class AnnotationEntity(
     val chapterTitle: String?,
     val updatedAt: String?,
 )
+
+/** Durable lifecycle state for a user-requested offline book download. */
+@Entity(
+    tableName = "download_tasks",
+    indices = [Index(value = ["bookId", "bookFileId"], unique = true)],
+)
+data class DownloadTaskEntity(
+    @PrimaryKey val taskKey: String,
+    val bookId: Long,
+    val bookFileId: Long,
+    val bookType: String,
+    val bookTitle: String,
+    val status: String,
+    val bytesRead: Long = 0L,
+    val totalBytes: Long? = null,
+    val errorMessage: String? = null,
+    val createdAtMs: Long,
+    val updatedAtMs: Long,
+)

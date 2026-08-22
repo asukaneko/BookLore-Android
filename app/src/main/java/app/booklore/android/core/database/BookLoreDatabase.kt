@@ -14,14 +14,16 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         BookEntity::class,
         PendingSyncEntity::class,
         AnnotationEntity::class,
+        DownloadTaskEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class BookLoreDatabase : RoomDatabase() {
     abstract fun catalogDao(): CatalogDao
     abstract fun pendingSyncDao(): PendingSyncDao
     abstract fun annotationDao(): AnnotationDao
+    abstract fun downloadTaskDao(): DownloadTaskDao
 
     companion object {
         @Volatile
@@ -39,6 +41,24 @@ abstract class BookLoreDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `download_tasks` (" +
+                        "`taskKey` TEXT NOT NULL, `bookId` INTEGER NOT NULL, " +
+                        "`bookFileId` INTEGER NOT NULL, `bookType` TEXT NOT NULL, " +
+                        "`bookTitle` TEXT NOT NULL, `status` TEXT NOT NULL, " +
+                        "`bytesRead` INTEGER NOT NULL, `totalBytes` INTEGER, " +
+                        "`errorMessage` TEXT, `createdAtMs` INTEGER NOT NULL, " +
+                        "`updatedAtMs` INTEGER NOT NULL, PRIMARY KEY(`taskKey`))",
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_download_tasks_bookId_bookFileId` " +
+                        "ON `download_tasks` (`bookId`, `bookFileId`)",
+                )
+            }
+        }
+
         fun get(context: Context): BookLoreDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -47,6 +67,7 @@ abstract class BookLoreDatabase : RoomDatabase() {
                     "booklore.db",
                 )
                     .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_2_3)
                     .build()
                     .also { instance = it }
             }

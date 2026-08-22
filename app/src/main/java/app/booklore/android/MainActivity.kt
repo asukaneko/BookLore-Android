@@ -12,6 +12,7 @@ import app.booklore.android.core.database.BookLoreDatabase
 import app.booklore.android.core.cache.CacheManager
 import app.booklore.android.core.network.BookLoreApi
 import app.booklore.android.core.offline.OfflineBookStore
+import app.booklore.android.core.offline.OfflineDownloadQueue
 import app.booklore.android.core.security.SessionStore
 import app.booklore.android.feature.AppViewModel
 import app.booklore.android.sync.PendingSyncQueue
@@ -32,6 +33,11 @@ class MainActivity : ComponentActivity() {
                     pendingSyncQueue = PendingSyncQueue(applicationContext, database),
                     cacheManager = CacheManager(applicationContext, database),
                     offlineBookStore = OfflineBookStore(applicationContext),
+                    offlineDownloadQueue = OfflineDownloadQueue(
+                        applicationContext,
+                        database,
+                        OfflineBookStore(applicationContext),
+                    ),
                 ) as T
             }
         }

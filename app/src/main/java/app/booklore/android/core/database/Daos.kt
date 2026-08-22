@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface CatalogDao {
@@ -103,4 +104,50 @@ interface AnnotationDao {
         clearBook(bookId)
         insertAll(annotations)
     }
+}
+
+@Dao
+interface DownloadTaskDao {
+    @Query("SELECT * FROM download_tasks ORDER BY updatedAtMs DESC")
+    fun observeAll(): Flow<List<DownloadTaskEntity>>
+
+    @Query("SELECT * FROM download_tasks ORDER BY updatedAtMs DESC")
+    suspend fun all(): List<DownloadTaskEntity>
+
+    @Query("SELECT * FROM download_tasks WHERE taskKey = :taskKey LIMIT 1")
+    suspend fun find(taskKey: String): DownloadTaskEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(task: DownloadTaskEntity)
+
+    @Query("UPDATE download_tasks SET status = :status, updatedAtMs = :updatedAtMs WHERE taskKey = :taskKey AND status != 'CANCELLED'")
+    suspend fun markStatus(taskKey: String, status: String, updatedAtMs: Long): Int
+
+    @Query("UPDATE download_tasks SET status = :status, bytesRead = :bytesRead, totalBytes = :totalBytes, errorMessage = :errorMessage, updatedAtMs = :updatedAtMs WHERE taskKey = :taskKey")
+    suspend fun updateProgress(
+        taskKey: String,
+        status: String,
+        bytesRead: Long,
+        totalBytes: Long?,
+        errorMessage: String?,
+        updatedAtMs: Long,
+    )
+
+    @Query("UPDATE download_tasks SET status = :status, bytesRead = :bytesRead, totalBytes = :totalBytes, errorMessage = NULL, updatedAtMs = :updatedAtMs WHERE taskKey = :taskKey")
+    suspend fun markFinished(
+        taskKey: String,
+        status: String,
+        bytesRead: Long,
+        totalBytes: Long?,
+        updatedAtMs: Long,
+    )
+
+    @Query("UPDATE download_tasks SET status = :status, errorMessage = :errorMessage, updatedAtMs = :updatedAtMs WHERE taskKey = :taskKey")
+    suspend fun markFailed(taskKey: String, status: String, errorMessage: String?, updatedAtMs: Long)
+
+    @Query("DELETE FROM download_tasks WHERE taskKey = :taskKey")
+    suspend fun delete(taskKey: String)
+
+    @Query("DELETE FROM download_tasks")
+    suspend fun clear()
 }
