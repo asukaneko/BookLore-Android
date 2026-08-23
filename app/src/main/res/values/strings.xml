@@ -63,6 +63,8 @@
     <string name="navigation_shelves">Shelves</string>
     <string name="navigation_reading">Reading</string>
     <string name="navigation_search">Search</string>
+    <string name="navigation_series">Series</string>
+    <string name="content_description_series">Open series</string>
     <string name="reading_now">Reading now</string>
     <string name="continue_reading">Continue reading</string>
     <string name="recently_read">Recently read</string>
@@ -178,6 +180,11 @@
     <string name="reset_filters">Reset filters</string>
     <string name="search_results">Search results</string>
     <string name="search_no_results">No books match the selected filters.</string>
+    <string name="series_search_placeholder">Search by series name or author</string>
+    <string name="series_not_started">Not started</string>
+    <string name="series_in_progress">In progress</string>
+    <string name="series_completed">Completed</string>
+    <string name="series_book_count">%1$d books</string>
     <string name="statistics">Statistics</string>
     <string name="content_description_open_statistics">Open statistics</string>
     <string name="content_description_refresh_statistics">Refresh statistics</string>

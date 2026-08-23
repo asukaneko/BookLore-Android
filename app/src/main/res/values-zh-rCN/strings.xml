@@ -68,6 +68,8 @@
     <string name="content_description_open_book">&#x6253;&#x5F00;&#x300A;%1$s&#x300B;</string>
     <string name="navigation_reading">&#x9605;&#x8BFB;&#x4E2D;</string>
     <string name="navigation_search">&#x641C;&#x7D22;</string>
+    <string name="navigation_series">&#x7CFB;&#x5217;</string>
+    <string name="content_description_series">&#x6253;&#x5F00;&#x7CFB;&#x5217;</string>
     <string name="reading_now">&#x9605;&#x8BFB;&#x4E2D;</string>
     <string name="continue_reading">&#x7EE7;&#x7EED;&#x9605;&#x8BFB;</string>
     <string name="recently_read">&#x6700;&#x8FD1;&#x9605;&#x8BFB;</string>
@@ -178,6 +180,11 @@
     <string name="reset_filters">重置筛选</string>
     <string name="search_results">搜索结果</string>
     <string name="search_no_results">没有符合筛选条件的图书。</string>
+    <string name="series_search_placeholder">&#x6309;&#x7CFB;&#x5217;&#x540D;&#x79F0;&#x6216;&#x4F5C;&#x8005;&#x641C;&#x7D22;</string>
+    <string name="series_not_started">&#x672A;&#x5F00;&#x59CB;</string>
+    <string name="series_in_progress">&#x8FDB;&#x884C;&#x4E2D;</string>
+    <string name="series_completed">&#x5DF2;&#x5B8C;&#x6210;</string>
+    <string name="series_book_count">%1$d &#x672C;&#x56FE;&#x4E66;</string>
     <string name="statistics">&#x7EDF;&#x8BA1;</string>
     <string name="content_description_open_statistics">&#x6253;&#x5F00;&#x7EDF;&#x8BA1;</string>
     <string name="content_description_refresh_statistics">&#x5237;&#x65B0;&#x7EDF;&#x8BA1;</string>

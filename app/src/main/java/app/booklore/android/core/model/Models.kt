@@ -54,6 +54,9 @@ data class Book(
     val libraryId: Long? = null,
     val libraryName: String? = null,
     val title: String? = null,
+    // Some BookLore server versions expose series data on the book as well as metadata.
+    val seriesName: String? = null,
+    val seriesNumber: Float? = null,
     val metadata: BookMetadata? = null,
     val primaryFile: BookFile? = null,
     val lastReadTime: String? = null,
@@ -81,6 +84,8 @@ data class BookMetadata(
     val language: String? = null,
     val pageCount: Int? = null,
     val seriesName: String? = null,
+    val series: String? = null,
+    val seriesTitle: String? = null,
     val seriesNumber: Float? = null,
     val seriesTotal: Int? = null,
     val rating: Double? = null,

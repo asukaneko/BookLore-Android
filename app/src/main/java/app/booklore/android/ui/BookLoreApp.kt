@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -636,23 +637,27 @@ private fun CatalogScreen(
     var statisticsOpen by rememberSaveable { mutableStateOf(false) }
     var cacheOpen by rememberSaveable { mutableStateOf(false) }
     var offlineDownloadsOpen by rememberSaveable { mutableStateOf(false) }
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
+    var selectedSeriesTitle by rememberSaveable { mutableStateOf<String?>(null) }
     val compactBookGrid = state.compactBookGrid
     val readingGridState = rememberLazyGridState()
     val collectionGridState = rememberLazyGridState()
+    val seriesGridState = rememberLazyGridState()
     val searchGridState = rememberLazyGridState()
     val settingsGridState = rememberLazyGridState()
     val activeGridState = when (tab) {
         0 -> readingGridState
         1 -> collectionGridState
-        2 -> searchGridState
+        2 -> seriesGridState
         else -> settingsGridState
     }
     val pageTitle = when (tab) {
         0 -> stringResource(R.string.reading_now)
         1 -> stringResource(R.string.libraries)
-        2 -> stringResource(R.string.navigation_search)
+        2 -> stringResource(R.string.navigation_series)
         else -> stringResource(R.string.settings)
     }
+    val toolbarPageTitle = if (tab == 2) selectedSeriesTitle ?: pageTitle else pageTitle
     val titleTransitionDistancePx = with(LocalDensity.current) { TitleTransitionDistance.toPx() }
     val titleScrollProgress by remember(activeGridState, titleTransitionDistancePx) {
         derivedStateOf {
@@ -666,15 +671,17 @@ private fun CatalogScreen(
     val toolbarTitleAlpha = ((titleScrollProgress - ToolbarTitleFadeStart) / (1f - ToolbarTitleFadeStart))
         .coerceIn(0f, 1f)
 
-    BackHandler(enabled = appearanceEditorOpen || statisticsOpen || cacheOpen || offlineDownloadsOpen) {
+    BackHandler(enabled = appearanceEditorOpen || statisticsOpen || cacheOpen || offlineDownloadsOpen || searchOpen) {
         appearanceEditorOpen = false
         statisticsOpen = false
         cacheOpen = false
         offlineDownloadsOpen = false
+        searchOpen = false
     }
 
     AnimatedContent(
         targetState = when {
+            searchOpen -> 5
             cacheOpen -> 4
             offlineDownloadsOpen -> 3
             statisticsOpen -> 2
@@ -696,6 +703,21 @@ private fun CatalogScreen(
         label = "settings subpage",
     ) { catalogOverlay ->
         when (catalogOverlay) {
+            5 -> SearchCatalog(
+                books = state.books,
+                libraries = state.libraries,
+                shelves = state.shelves,
+                onBack = { searchOpen = false },
+                onRefresh = onRefresh,
+                onBookSelected = onBookSelected,
+                coverUrl = coverUrl,
+                accessToken = accessToken,
+                gridState = searchGridState,
+                pageTitle = stringResource(R.string.search_books),
+                pageTitleAlpha = 1f,
+                compactBookGrid = compactBookGrid,
+                downloadedBookIds = downloadedBookIds,
+            )
             4 -> CacheScreen(
                 snapshot = state.cacheSnapshot,
                 isLoading = state.isCacheLoading,
@@ -731,10 +753,22 @@ private fun CatalogScreen(
             Scaffold(
                 topBar = {
                     TopAppBar(
+                        navigationIcon = {
+                            if (tab == 2 && selectedSeriesTitle != null) {
+                                IconButton(onClick = { selectedSeriesTitle = null }) {
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = stringResource(R.string.content_description_back),
+                                    )
+                                }
+                            }
+                        },
                         title = {
                             Text(
-                                text = pageTitle,
-                                modifier = Modifier.graphicsLayer { alpha = toolbarTitleAlpha },
+                                text = toolbarPageTitle,
+                                modifier = Modifier.graphicsLayer {
+                                    alpha = if (tab == 2 && selectedSeriesTitle != null) 1f else toolbarTitleAlpha
+                                },
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 fontWeight = PageTitleFontWeight,
@@ -783,11 +817,11 @@ private fun CatalogScreen(
                             onClick = { onTabSelected(2) },
                             icon = {
                                 Icon(
-                                    Icons.Filled.Search,
-                                    contentDescription = stringResource(R.string.navigation_search),
+                                    Icons.Filled.CollectionsBookmark,
+                                    contentDescription = stringResource(R.string.content_description_series),
                                 )
                             },
-                            label = { Text(stringResource(R.string.navigation_search)) },
+                            label = { Text(stringResource(R.string.navigation_series)) },
                             alwaysShowLabel = false,
                         )
                         NavigationBarItem(
@@ -855,20 +889,19 @@ private fun CatalogScreen(
                                     pageTitleAlpha = contentTitleAlpha,
                                     compactBookGrid = compactBookGrid,
                                     downloadedBookIds = downloadedBookIds,
+                                    onOpenSearch = { searchOpen = true },
                                 )
-                                2 -> SearchCatalog(
+                                2 -> SeriesCatalog(
                                     books = state.books,
-                                    libraries = state.libraries,
-                                    shelves = state.shelves,
-                                    onRefresh = onRefresh,
                                     onBookSelected = onBookSelected,
                                     coverUrl = coverUrl,
                                     accessToken = accessToken,
-                                    gridState = searchGridState,
-                                    pageTitle = stringResource(R.string.navigation_search),
+                                    gridState = seriesGridState,
+                                    pageTitle = stringResource(R.string.navigation_series),
                                     pageTitleAlpha = contentTitleAlpha,
                                     compactBookGrid = compactBookGrid,
-                                    downloadedBookIds = downloadedBookIds,
+                                    selectedSeries = selectedSeriesTitle,
+                                    onSelectedSeriesChange = { selectedSeriesTitle = it },
                                 )
                                 else -> SettingsCatalog(
                                     serverUrl = serverUrl,
@@ -2409,11 +2442,254 @@ private fun LastReadText(book: Book) {
     )
 }
 
+private data class SeriesSummary(
+    val name: String,
+    val books: List<Book>,
+)
+
+private fun Book.seriesDisplayName(): String? =
+    seriesName?.trim()?.takeIf(String::isNotBlank)
+        ?: metadata?.seriesName?.trim()?.takeIf(String::isNotBlank)
+        ?: metadata?.series?.trim()?.takeIf(String::isNotBlank)
+        ?: metadata?.seriesTitle?.trim()?.takeIf(String::isNotBlank)
+
+private fun Book.seriesDisplayNumber(): Float? = seriesNumber ?: metadata?.seriesNumber
+
+@Composable
+private fun SeriesCatalog(
+    books: List<Book>,
+    onBookSelected: (Long) -> Unit,
+    coverUrl: (Long) -> String?,
+    accessToken: String?,
+    gridState: LazyGridState,
+    pageTitle: String,
+    pageTitleAlpha: Float,
+    compactBookGrid: Boolean,
+    selectedSeries: String?,
+    onSelectedSeriesChange: (String?) -> Unit,
+) {
+    var query by rememberSaveable { mutableStateOf("") }
+    var statusFilter by rememberSaveable { mutableStateOf("all") }
+    val allSeries = remember(books) {
+        books.asSequence()
+            .mapNotNull { book -> book.seriesDisplayName()?.let { it to book } }
+            .groupBy({ it.first.lowercase(Locale.getDefault()) }, { it.second })
+            .map { (_, seriesBooks) ->
+                SeriesSummary(
+                    name = seriesBooks.first().seriesDisplayName().orEmpty(),
+                    books = seriesBooks.sortedWith(compareBy { it.seriesDisplayNumber() ?: Float.MAX_VALUE }),
+                )
+            }
+            .sortedBy { it.name.lowercase(Locale.getDefault()) }
+            .toList()
+    }
+    val shownSeries = remember(allSeries, query, statusFilter) {
+        allSeries.filter { series ->
+            (query.isBlank() || series.name.contains(query.trim(), ignoreCase = true) ||
+                series.books.any { it.displayAuthors().contains(query.trim(), ignoreCase = true) }) &&
+                when (statusFilter) {
+                    "unread" -> series.books.all { it.readStatus != "READ" }
+                    "reading" -> series.books.any { it.readStatus == "READING" }
+                    "read" -> series.books.all { it.readStatus == "READ" }
+                    else -> true
+                }
+        }
+    }
+
+    BackHandler(enabled = selectedSeries != null) { onSelectedSeriesChange(null) }
+    AnimatedContent(
+        targetState = selectedSeries,
+        modifier = Modifier.fillMaxSize(),
+        transitionSpec = {
+            val direction = if (targetState == null) -1 else 1
+            (slideInHorizontally(
+                animationSpec = tween(NAVIGATION_ANIMATION_MILLIS, easing = FastOutSlowInEasing),
+                initialOffsetX = { direction * it },
+            ) + fadeIn(animationSpec = tween(FADE_ANIMATION_MILLIS))) togetherWith
+                (slideOutHorizontally(
+                    animationSpec = tween(NAVIGATION_ANIMATION_MILLIS, easing = FastOutSlowInEasing),
+                    targetOffsetX = { -direction * it },
+                ) + fadeOut(animationSpec = tween(FADE_ANIMATION_MILLIS)))
+        },
+        label = "series destination",
+    ) { selectedName ->
+        val series = shownSeries.firstOrNull { it.name == selectedName } ?: allSeries.firstOrNull { it.name == selectedName }
+        if (series != null) {
+            SeriesBooksScreen(
+                series = series,
+                onBookSelected = onBookSelected,
+                coverUrl = coverUrl,
+                accessToken = accessToken,
+                compactBookGrid = compactBookGrid,
+            )
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = if (compactBookGrid) 132.dp else 168.dp),
+                modifier = Modifier.fillMaxSize(),
+                state = gridState,
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (compactBookGrid) 12.dp else 16.dp),
+                verticalArrangement = Arrangement.spacedBy(if (compactBookGrid) 16.dp else 20.dp),
+            ) {
+                item(span = { GridItemSpan(maxLineSpan) }) { PageTitle(pageTitle, pageTitleAlpha) }
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        OutlinedTextField(
+                            value = query,
+                            onValueChange = { query = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            shape = InputFieldShape,
+                            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                            placeholder = { Text(stringResource(R.string.series_search_placeholder)) },
+                        )
+                        OptionChipRow(
+                            selectedKey = statusFilter,
+                            items = listOf(
+                                "all" to stringResource(R.string.filter_all),
+                                "unread" to stringResource(R.string.series_not_started),
+                                "reading" to stringResource(R.string.series_in_progress),
+                                "read" to stringResource(R.string.series_completed),
+                            ),
+                            onSelected = { statusFilter = it },
+                        )
+                    }
+                }
+                if (shownSeries.isEmpty()) {
+                    item { EmptyState { } }
+                } else {
+                    items(shownSeries, key = { it.name }) { seriesItem ->
+                        SeriesCard(
+                            series = seriesItem,
+                            coverUrl = coverUrl,
+                            accessToken = accessToken,
+                            compact = compactBookGrid,
+                            onClick = { onSelectedSeriesChange(seriesItem.name) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SeriesCard(
+    series: SeriesSummary,
+    coverUrl: (Long) -> String?,
+    accessToken: String?,
+    compact: Boolean,
+    onClick: () -> Unit,
+) {
+    if (series.books.isEmpty()) return
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(if (compact) 6.dp else 8.dp),
+            verticalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp),
+        ) {
+            SeriesCoverStack(
+                books = series.books,
+                coverUrl = coverUrl,
+                accessToken = accessToken,
+                title = series.name,
+            )
+            Text(series.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(
+                text = stringResource(R.string.series_book_count, series.books.size),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            LinearProgressIndicator(
+                progress = { series.books.count { it.readStatus == "READ" }.toFloat() / series.books.size.coerceAtLeast(1) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SeriesCoverStack(
+    books: List<Book>,
+    coverUrl: (Long) -> String?,
+    accessToken: String?,
+    title: String,
+) {
+    Box(
+        modifier = Modifier.fillMaxWidth().aspectRatio(0.68f),
+        contentAlignment = Alignment.Center,
+    ) {
+        val coverBooks = books.take(3)
+        coverBooks.asReversed().forEachIndexed { index, book ->
+            val stackOffset = index - (coverBooks.size - 1) / 2f
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.62f)
+                    .fillMaxHeight()
+                    .align(Alignment.Center)
+                    .graphicsLayer {
+                        translationX = stackOffset * 24.dp.toPx()
+                        rotationZ = stackOffset * 4f
+                    },
+            ) {
+                BookCover(
+                    bookId = book.id,
+                    title = title,
+                    url = coverUrl(book.id),
+                    accessToken = accessToken,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SeriesBooksScreen(
+    series: SeriesSummary,
+    onBookSelected: (Long) -> Unit,
+    coverUrl: (Long) -> String?,
+    accessToken: String?,
+    compactBookGrid: Boolean,
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        Text(
+            text = stringResource(R.string.series_book_count, series.books.size),
+            modifier = Modifier.fillMaxWidth().padding(start = 64.dp, end = 16.dp, bottom = 8.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(minSize = if (compactBookGrid) 124.dp else 144.dp),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (compactBookGrid) 8.dp else 12.dp),
+            verticalArrangement = Arrangement.spacedBy(if (compactBookGrid) 12.dp else 16.dp),
+        ) {
+            items(series.books, key = { it.id }) { book ->
+                BookCard(
+                    book = book,
+                    coverUrl = coverUrl(book.id),
+                    accessToken = accessToken,
+                    compact = compactBookGrid,
+                    onClick = { onBookSelected(book.id) },
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun SearchCatalog(
     books: List<Book>,
     libraries: List<Library>,
     shelves: List<Shelf>,
+    onBack: () -> Unit,
     onRefresh: () -> Unit,
     onBookSelected: (Long) -> Unit,
     coverUrl: (Long) -> String?,
@@ -2456,11 +2732,13 @@ private fun SearchCatalog(
             .sortedByOption(sortOption, sortAscending)
     }
 
-    BackHandler(enabled = resultsOpen) { resultsOpen = false }
+    BackHandler {
+        if (resultsOpen) resultsOpen = false else onBack()
+    }
 
     AnimatedContent(
         targetState = resultsOpen,
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().statusBarsPadding(),
         transitionSpec = {
             val direction = if (targetState) 1 else -1
             (slideInHorizontally(
@@ -2488,6 +2766,7 @@ private fun SearchCatalog(
         } else {
             SearchFilterForm(
                 query = query,
+                onBack = onBack,
                 onQueryChange = { query = it },
                 libraries = libraries,
                 shelves = shelves,
@@ -2529,6 +2808,7 @@ private fun SearchCatalog(
 private fun SearchFilterForm(
     query: String,
     onQueryChange: (String) -> Unit,
+    onBack: () -> Unit,
     libraries: List<Library>,
     shelves: List<Shelf>,
     selectedLibraryId: Long?,
@@ -2559,7 +2839,22 @@ private fun SearchFilterForm(
         contentPadding = PaddingValues(bottom = 24.dp),
     ) {
         item {
-            PageTitle(pageTitle, pageTitleAlpha)
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp, top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = stringResource(R.string.content_description_back),
+                    )
+                }
+                Text(
+                    text = stringResource(R.string.search_books),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = PageTitleFontWeight,
+                )
+            }
         }
         item {
             Column(
@@ -2838,6 +3133,7 @@ private fun LibraryCatalog(
     pageTitleAlpha: Float,
     compactBookGrid: Boolean,
     downloadedBookIds: Set<Long>,
+    onOpenSearch: () -> Unit,
 ) {
     var selectedLibraryId by rememberSaveable { mutableStateOf<Long?>(null) }
     var selectedShelfId by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -2876,14 +3172,39 @@ private fun LibraryCatalog(
         pageTitleAlpha = pageTitleAlpha,
         compactBookGrid = compactBookGrid,
         filters = {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.End,
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                OutlinedButton(onClick = { filtersOpen = true }) {
-                    Icon(Icons.Filled.FilterList, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(stringResource(R.string.filter_action))
+                Surface(
+                    onClick = onOpenSearch,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    shape = InputFieldShape,
+                    color = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                )
+                {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.Search, contentDescription = null)
+                        Spacer(Modifier.width(12.dp))
+                        Text(stringResource(R.string.search_books))
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    OutlinedButton(onClick = { filtersOpen = true }) {
+                        Icon(Icons.Filled.FilterList, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.filter_action))
+                    }
                 }
             }
         },
