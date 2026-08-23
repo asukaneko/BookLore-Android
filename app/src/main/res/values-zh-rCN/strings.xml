@@ -290,4 +290,7 @@
     <string name="download_cancelled">&#x4E0B;&#x8F7D;&#x5DF2;&#x53D6;&#x6D88;</string>
     <string name="cancel_download">&#x53D6;&#x6D88;&#x4E0B;&#x8F7D;</string>
     <string name="retry_download">&#x91CD;&#x8BD5;&#x4E0B;&#x8F7D;</string>
+    <string name="offline_downloads_active_count">&#x6B63;&#x5728;&#x4E0B;&#x8F7D; %1$d &#x672C;</string>
+    <string name="offline_downloads_task_count">&#x5171; %1$d &#x4E2A;&#x4E0B;&#x8F7D;&#x4EFB;&#x52A1;</string>
+    <string name="content_description_open_offline_downloads">&#x6253;&#x5F00;&#x79BB;&#x7EBF;&#x4E0B;&#x8F7D;</string>
 </resources>

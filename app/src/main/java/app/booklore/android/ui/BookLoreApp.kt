@@ -189,7 +189,6 @@ import kotlinx.coroutines.withContext
 private val InputFieldShape = RoundedCornerShape(12.dp)
 private val TitleTransitionDistance = 72.dp
 private val PageTitleFontWeight = FontWeight.SemiBold
-private const val MAX_VISIBLE_DOWNLOAD_TASKS = 20
 private const val ToolbarTitleFadeStart = 0.78f
 private const val MIN_FONT_SCALE = 0.85f
 private const val MAX_FONT_SCALE = 1.30f
@@ -636,6 +635,7 @@ private fun CatalogScreen(
     var appearanceEditorOpen by rememberSaveable { mutableStateOf(false) }
     var statisticsOpen by rememberSaveable { mutableStateOf(false) }
     var cacheOpen by rememberSaveable { mutableStateOf(false) }
+    var offlineDownloadsOpen by rememberSaveable { mutableStateOf(false) }
     val compactBookGrid = state.compactBookGrid
     val readingGridState = rememberLazyGridState()
     val collectionGridState = rememberLazyGridState()
@@ -666,15 +666,17 @@ private fun CatalogScreen(
     val toolbarTitleAlpha = ((titleScrollProgress - ToolbarTitleFadeStart) / (1f - ToolbarTitleFadeStart))
         .coerceIn(0f, 1f)
 
-    BackHandler(enabled = appearanceEditorOpen || statisticsOpen || cacheOpen) {
+    BackHandler(enabled = appearanceEditorOpen || statisticsOpen || cacheOpen || offlineDownloadsOpen) {
         appearanceEditorOpen = false
         statisticsOpen = false
         cacheOpen = false
+        offlineDownloadsOpen = false
     }
 
     AnimatedContent(
         targetState = when {
-            cacheOpen -> 3
+            cacheOpen -> 4
+            offlineDownloadsOpen -> 3
             statisticsOpen -> 2
             appearanceEditorOpen -> 1
             else -> 0
@@ -694,12 +696,19 @@ private fun CatalogScreen(
         label = "settings subpage",
     ) { catalogOverlay ->
         when (catalogOverlay) {
-            3 -> CacheScreen(
+            4 -> CacheScreen(
                 snapshot = state.cacheSnapshot,
                 isLoading = state.isCacheLoading,
                 onBack = { cacheOpen = false },
                 onRefresh = onRefreshCache,
                 onClear = onClearCache,
+            )
+            3 -> OfflineDownloadsScreen(
+                tasks = state.offlineDownloadTasks,
+                onBack = { offlineDownloadsOpen = false },
+                onCancelDownload = onCancelDownload,
+                onRetryDownload = onRetryDownload,
+                onDeleteDownload = onDeleteDownload,
             )
             2 -> StatisticsScreen(
                 books = state.books,
@@ -871,9 +880,7 @@ private fun CatalogScreen(
                                     onRefreshSyncStatus = onRefreshSyncStatus,
                                     onSyncNow = onSyncNow,
                                     offlineDownloadTasks = state.offlineDownloadTasks,
-                                    onCancelDownload = onCancelDownload,
-                                    onRetryDownload = onRetryDownload,
-                                    onDeleteDownload = onDeleteDownload,
+                                    onOpenOfflineDownloads = { offlineDownloadsOpen = true },
                                     onOpenCache = { cacheOpen = true },
                                     gridState = settingsGridState,
                                     pageTitle = stringResource(R.string.settings),
@@ -3446,9 +3453,7 @@ private fun SettingsCatalog(
     onSignOut: () -> Unit,
     onRefreshSyncStatus: () -> Unit,
     onSyncNow: () -> Unit,
-    onCancelDownload: (OfflineDownloadTask) -> Unit,
-    onRetryDownload: (OfflineDownloadTask) -> Unit,
-    onDeleteDownload: (OfflineDownloadTask) -> Unit,
+    onOpenOfflineDownloads: () -> Unit,
     gridState: LazyGridState,
     pageTitle: String,
     pageTitleAlpha: Float,
@@ -3511,6 +3516,36 @@ private fun SettingsCatalog(
                         contentDescription = stringResource(R.string.content_description_open_cache),
                     )
                 }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onOpenOfflineDownloads)
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val activeTaskCount = offlineDownloadTasks.count(OfflineDownloadTask::isActive)
+                    val summary = when {
+                        activeTaskCount > 0 -> stringResource(
+                            R.string.offline_downloads_active_count,
+                            activeTaskCount,
+                        )
+                        offlineDownloadTasks.isEmpty() -> stringResource(R.string.download_queue_empty)
+                        else -> stringResource(R.string.offline_downloads_task_count, offlineDownloadTasks.size)
+                    }
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(stringResource(R.string.offline_downloads), style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            text = summary,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = stringResource(R.string.content_description_open_offline_downloads),
+                    )
+                }
                 HorizontalDivider()
                 Text(stringResource(R.string.sync), style = MaterialTheme.typography.titleMedium, fontWeight = PageTitleFontWeight)
                 Row(
@@ -3538,28 +3573,6 @@ private fun SettingsCatalog(
                         imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                         contentDescription = stringResource(R.string.sync_now),
                     )
-                }
-                HorizontalDivider()
-                Text(
-                    stringResource(R.string.offline_downloads),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = PageTitleFontWeight,
-                )
-                if (offlineDownloadTasks.isEmpty()) {
-                    Text(
-                        stringResource(R.string.download_queue_empty),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    offlineDownloadTasks.take(MAX_VISIBLE_DOWNLOAD_TASKS).forEach { task ->
-                        OfflineDownloadTaskRow(
-                            task = task,
-                            onCancel = { onCancelDownload(task) },
-                            onRetry = { onRetryDownload(task) },
-                            onDelete = { onDeleteDownload(task) },
-                        )
-                    }
                 }
                 HorizontalDivider()
                 Text(stringResource(R.string.display), style = MaterialTheme.typography.titleMedium, fontWeight = PageTitleFontWeight)
@@ -3600,6 +3613,60 @@ private fun SettingsCatalog(
                 }
                 HorizontalDivider()
                 OutlinedButton(onClick = onSignOut) { Text(stringResource(R.string.sign_out)) }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun OfflineDownloadsScreen(
+    tasks: List<OfflineDownloadTask>,
+    onBack: () -> Unit,
+    onCancelDownload: (OfflineDownloadTask) -> Unit,
+    onRetryDownload: (OfflineDownloadTask) -> Unit,
+    onDeleteDownload: (OfflineDownloadTask) -> Unit,
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.offline_downloads)) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.content_description_back),
+                        )
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        if (tasks.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = stringResource(R.string.download_queue_empty),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                lazyListItems(tasks, key = OfflineDownloadTask::taskKey) { task ->
+                    OfflineDownloadTaskRow(
+                        task = task,
+                        onCancel = { onCancelDownload(task) },
+                        onRetry = { onRetryDownload(task) },
+                        onDelete = { onDeleteDownload(task) },
+                    )
+                }
             }
         }
     }
