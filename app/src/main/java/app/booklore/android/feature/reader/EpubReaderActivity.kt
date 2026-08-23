@@ -123,8 +123,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import android.view.ViewGroup
-import android.webkit.WebView
 import org.json.JSONObject
 import org.readium.r2.navigator.DecorableNavigator
 import org.readium.r2.navigator.Decoration
@@ -260,20 +258,10 @@ private fun EpubReaderScreen(
                 onControlsVisibleChanged = { controlsVisible = it },
                 onClose = onClose,
                 onPrevious = {
-                    navigator?.turnPage(
-                        forward = false,
-                        fromPage = footerState.pageIndex,
-                        totalPages = footerState.totalPages,
-                        onTurned = viewModel::onPageTurned,
-                    )
+                    navigator?.goBackward(true)
                 },
                 onNext = {
-                    navigator?.turnPage(
-                        forward = true,
-                        fromPage = footerState.pageIndex,
-                        totalPages = footerState.totalPages,
-                        onTurned = viewModel::onPageTurned,
-                    )
+                    navigator?.goForward(true)
                 },
                 // Tap zones turn pages; Readium's WebView already handles swipe paging.
                 enablePageTurns = true,
@@ -524,58 +512,6 @@ private fun EpubErrorState(
         }
     }
 }
-
-/**
- * 章内翻页走 R2WebView 的原生 pager 动画（与滑动手势相同的代码路径），
- * 跨章节、固定版式或反射失败时回退到 navigator 的翻页实现。
- */
-private fun EpubNavigatorFragment.turnPage(
-    forward: Boolean,
-    fromPage: Int,
-    totalPages: Int,
-    onTurned: (Int) -> Unit,
-) {
-    val webView = findCurrentWebView()
-    val target = if (forward) fromPage + 1 else fromPage - 1
-    if (webView != null && totalPages > 0 && target in 0 until totalPages &&
-        webView.setCurrentItemSmooth(target)
-    ) {
-        // setCurrentItem 会立即更新内部页码，乐观同步页脚避免快速连点丢翻页
-        onTurned(target)
-    } else if (forward) {
-        goForward(true)
-    } else {
-        goBackward(true)
-    }
-}
-
-/** 当前页面 fragment 采用 RESUME_ONLY_CURRENT_FRAGMENT，仅当前页处于 RESUMED 状态。 */
-private fun EpubNavigatorFragment.findCurrentWebView(): WebView? {
-    val view = childFragmentManager.fragments.firstOrNull { it.isResumed }?.view ?: return null
-    return findWebView(view)
-}
-
-private fun findWebView(view: View): WebView? {
-    if (view is WebView) return view
-    if (view is ViewGroup) {
-        for (i in 0 until view.childCount) {
-            findWebView(view.getChildAt(i))?.let { return it }
-        }
-    }
-    return null
-}
-
-/**
- * 反射调用 R2WebView.setCurrentItem(item, smoothScroll=true)（类为 Kotlin internal，
- * 无法直接引用；方法名经 proguard 规则保留）。固定版式的 R2BasicWebView 无此方法，
- * 反射失败返回 false。
- */
-private fun WebView.setCurrentItemSmooth(item: Int): Boolean = runCatching {
-    javaClass
-        .getMethod("setCurrentItem", Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
-        .invoke(this, item, true)
-    true
-}.getOrDefault(false)
 
 @OptIn(ExperimentalReadiumApi::class)
 @Composable
@@ -1316,11 +1252,6 @@ private class EpubReaderViewModel(
         updateReaderSettings {
             it.copy(pageMargins = pageMargins.coerceIn(READER_PAGE_MARGINS_MIN, READER_PAGE_MARGINS_MAX))
         }
-    }
-
-    /** 点击翻页的乐观页码同步（真实页码随后由 onPageChanged 回调确认）。 */
-    fun onPageTurned(pageIndex: Int) {
-        _footerState.value = _footerState.value.copy(pageIndex = pageIndex)
     }
 
     fun onPageInfoChanged(pageIndex: Int, totalPages: Int, locator: Locator) {
