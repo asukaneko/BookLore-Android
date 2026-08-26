@@ -98,6 +98,11 @@ class BookLoreApi(private val sessionStore: SessionStore) {
 
     suspend fun libraries(): List<Library> = authenticatedGet("/api/v1/libraries", ListSerializer(Library.serializer()))
 
+    /** Triggers the server-side filesystem scan for one library. */
+    suspend fun rescanLibrary(libraryId: Long) {
+        authenticatedRequest("/api/v1/libraries/$libraryId/refresh", method = "PUT")
+    }
+
     suspend fun shelves(): List<Shelf> = authenticatedGet("/api/v1/shelves", ListSerializer(Shelf.serializer()))
 
     suspend fun books(): List<Book> = authenticatedGet("/api/v1/books?withDescription=false", ListSerializer(Book.serializer()))
@@ -599,7 +604,10 @@ class BookLoreApi(private val sessionStore: SessionStore) {
         when (method) {
             "GET" -> builder.get()
             "POST" -> builder.post(requestBody ?: EMPTY_JSON_BODY)
-            else -> builder.method(method, requestBody)
+            else -> builder.method(
+                method,
+                requestBody ?: if (method == "PUT") EMPTY_JSON_BODY else null,
+            )
         }
         return try {
             client.newCall(builder.build()).execute().use { response -> response.toNetworkResponse() }

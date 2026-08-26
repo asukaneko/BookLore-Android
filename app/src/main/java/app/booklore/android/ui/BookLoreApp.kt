@@ -278,6 +278,7 @@ fun BookLoreApp(viewModel: AppViewModel) {
                     selectedTab = catalogTab,
                     onTabSelected = { catalogTab = it },
                     onRefresh = viewModel::refreshCatalog,
+                    onRescanLibraries = viewModel::rescanLibraries,
                     onBookSelected = viewModel::selectBook,
                     onContinueReading = { bookId ->
                         openReaderWhenBookSelected = bookId
@@ -611,6 +612,7 @@ private fun CatalogScreen(
     selectedTab: Int,
     onTabSelected: (Int) -> Unit,
     onRefresh: () -> Unit,
+    onRescanLibraries: (Long?) -> Unit,
     onBookSelected: (Long) -> Unit,
     onContinueReading: (Long) -> Unit,
     onCompactBookGridChanged: (Boolean) -> Unit,
@@ -639,6 +641,7 @@ private fun CatalogScreen(
     var offlineDownloadsOpen by rememberSaveable { mutableStateOf(false) }
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var selectedSeriesTitle by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedLibraryId by rememberSaveable { mutableStateOf<Long?>(null) }
     val compactBookGrid = state.compactBookGrid
     val readingGridState = rememberLazyGridState()
     val collectionGridState = rememberLazyGridState()
@@ -775,11 +778,20 @@ private fun CatalogScreen(
                             )
                         },
                         actions = {
-                            if (tab == 0) {
-                                IconButton(onClick = { statisticsOpen = true }) {
+                            when (tab) {
+                                0 -> IconButton(onClick = { statisticsOpen = true }) {
                                     Icon(
                                         imageVector = Icons.Filled.BarChart,
                                         contentDescription = stringResource(R.string.content_description_open_statistics),
+                                    )
+                                }
+                                1 -> IconButton(
+                                    onClick = { onRescanLibraries(selectedLibraryId) },
+                                    enabled = !state.isBusy,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Refresh,
+                                        contentDescription = stringResource(R.string.content_description_rescan_library),
                                     )
                                 }
                             }
@@ -881,6 +893,8 @@ private fun CatalogScreen(
                                     shelves = state.shelves,
                                     books = state.books,
                                     onRefresh = onRefresh,
+                                    selectedLibraryId = selectedLibraryId,
+                                    onLibrarySelected = { selectedLibraryId = it },
                                     onBookSelected = onBookSelected,
                                     coverUrl = coverUrl,
                                     accessToken = accessToken,
@@ -3125,6 +3139,8 @@ private fun LibraryCatalog(
     shelves: List<Shelf>,
     books: List<Book>,
     onRefresh: () -> Unit,
+    selectedLibraryId: Long?,
+    onLibrarySelected: (Long?) -> Unit,
     onBookSelected: (Long) -> Unit,
     coverUrl: (Long) -> String?,
     accessToken: String?,
@@ -3135,7 +3151,6 @@ private fun LibraryCatalog(
     downloadedBookIds: Set<Long>,
     onOpenSearch: () -> Unit,
 ) {
-    var selectedLibraryId by rememberSaveable { mutableStateOf<Long?>(null) }
     var selectedShelfId by rememberSaveable { mutableStateOf<Long?>(null) }
     var downloadedOnly by rememberSaveable { mutableStateOf(false) }
     var filtersOpen by rememberSaveable { mutableStateOf(false) }
@@ -3215,7 +3230,7 @@ private fun LibraryCatalog(
             libraries = libraries,
             shelves = shelves,
             selectedLibraryId = selectedLibraryId,
-            onLibrarySelected = { selectedLibraryId = it },
+            onLibrarySelected = onLibrarySelected,
             selectedShelfId = selectedShelfId,
             onShelfSelected = { selectedShelfId = it },
             downloadedOnly = downloadedOnly,
@@ -3225,7 +3240,7 @@ private fun LibraryCatalog(
             sortAscending = sortAscending,
             onToggleSortOrder = { sortAscending = !sortAscending },
             onReset = {
-                selectedLibraryId = null
+                onLibrarySelected(null)
                 selectedShelfId = null
                 downloadedOnly = false
                 sortOption = BookSortOption.DEFAULT

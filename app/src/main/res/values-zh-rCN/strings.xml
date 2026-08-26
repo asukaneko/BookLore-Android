@@ -65,6 +65,7 @@
     <string name="content_description_back">返回</string>
     <string name="content_description_settings">设置</string>
     <string name="content_description_search">搜索图书</string>
+    <string name="content_description_rescan_library">&#x91CD;&#x65B0;&#x626B;&#x63CF;&#x4E66;&#x5E93;</string>
     <string name="content_description_open_book">&#x6253;&#x5F00;&#x300A;%1$s&#x300B;</string>
     <string name="navigation_reading">&#x9605;&#x8BFB;&#x4E2D;</string>
     <string name="navigation_search">&#x641C;&#x7D22;</string>

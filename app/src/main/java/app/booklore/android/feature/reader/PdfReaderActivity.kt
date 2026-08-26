@@ -105,6 +105,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -285,9 +287,14 @@ private fun PdfContinuousDocument(
     val horizontalScroll = rememberScrollState()
 
     LaunchedEffect(listState) {
-        snapshotFlow { listState.firstVisibleItemIndex }
+        // Do not feed every page boundary back into the whole reader while the
+        // finger is moving. That state update also persists progress and can
+        // force the controls/content tree to recompose during a frame.
+        snapshotFlow { listState.firstVisibleItemIndex to listState.isScrollInProgress }
             .distinctUntilChanged()
-            .collect { index -> onPageSelected(index + 1) }
+            .filter { (_, isScrolling) -> !isScrolling }
+            .map { (index, _) -> index + 1 }
+            .collect(onPageSelected)
     }
     LaunchedEffect(currentPage, listState) {
         val requestedIndex = currentPage - 1

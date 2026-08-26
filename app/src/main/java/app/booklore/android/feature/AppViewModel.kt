@@ -158,6 +158,17 @@ class AppViewModel(
         refreshOfflineBooks()
     }
 
+    /** Runs the server-side scan for the selected library, or every visible library when null. */
+    fun rescanLibraries(selectedLibraryId: Long?) = runRequest {
+        val librariesToScan = _state.value.libraries.filter { library ->
+            selectedLibraryId == null || library.id == selectedLibraryId
+        }
+        _state.update { it.copy(isBusy = true, authenticated = sessionStore.read() != null, error = null, offline = false) }
+        librariesToScan.forEach { library -> io { api.rescanLibrary(library.id) } }
+        loadCatalog()
+        refreshOfflineBooks()
+    }
+
     fun refreshStatistics(year: Int = Year.now().value) {
         viewModelScope.launch {
             _state.update { it.copy(isStatisticsLoading = true, statisticsError = null) }

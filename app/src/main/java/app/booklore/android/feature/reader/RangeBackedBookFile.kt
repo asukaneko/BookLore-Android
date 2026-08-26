@@ -2,7 +2,7 @@ package app.booklore.android.feature.reader
 
 import android.content.Context
 import android.os.Handler
-import android.os.Looper
+import android.os.HandlerThread
 import android.os.ParcelFileDescriptor
 import android.os.ProxyFileDescriptorCallback
 import android.os.storage.StorageManager
@@ -33,19 +33,30 @@ internal class RangeBackedBookFile(
         require(contentLength > 0) { "Book content is empty" }
         streamFile.parentFile?.mkdirs()
         streamFile.delete()
-        val callback = Callback(contentLength)
-        return storageManager.openProxyFileDescriptor(
-            ParcelFileDescriptor.MODE_READ_ONLY,
-            callback,
-            Handler(Looper.getMainLooper()),
-        )
+        // Proxy callbacks perform blocking HTTP range reads. They must not use
+        // the main looper or a new PDF block will stall every UI frame.
+        val callbackThread = HandlerThread("BookLorePdfRange").apply { start() }
+        val callback = Callback(contentLength, callbackThread)
+        return try {
+            storageManager.openProxyFileDescriptor(
+                ParcelFileDescriptor.MODE_READ_ONLY,
+                callback,
+                Handler(callbackThread.looper),
+            )
+        } catch (error: Exception) {
+            callback.release()
+            throw error
+        }
     }
 
     private inner class Callback(
         private val contentLength: Long,
+        private val callbackThread: HandlerThread,
     ) : ProxyFileDescriptorCallback() {
         private val file = RandomAccessFile(streamFile, "rw")
         private val loadedBlocks = mutableSetOf<Long>()
+        private val releaseLock = Any()
+        private var released = false
 
         override fun onGetSize(): Long = contentLength
 
@@ -65,10 +76,19 @@ internal class RangeBackedBookFile(
         }
 
         override fun onRelease() {
-            synchronized(file) {
-                file.close()
+            release()
+        }
+
+        fun release() {
+            synchronized(releaseLock) {
+                if (released) return
+                released = true
+                synchronized(file) {
+                    runCatching { file.close() }
+                }
+                streamFile.delete()
+                callbackThread.quitSafely()
             }
-            streamFile.delete()
         }
 
         @Synchronized
