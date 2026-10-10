@@ -20,6 +20,8 @@ class OfflineDownloadWorker(
         val dao = database.downloadTaskDao()
         val task = dao.find(taskKey) ?: return Result.success()
         if (task.status == OfflineDownloadStatus.CANCELLED.name) return Result.success()
+        val sessionStore = SessionStore(applicationContext)
+        if (sessionStore.readLocalMode()) return Result.retry()
         if (dao.markStatus(taskKey, OfflineDownloadStatus.DOWNLOADING.name, System.currentTimeMillis()) == 0) {
             return Result.success()
         }
@@ -27,7 +29,7 @@ class OfflineDownloadWorker(
         val store = OfflineBookStore(applicationContext)
         val destination = store.fileFor(task.bookId, task.bookFileId, task.bookType)
             ?: return fail(dao, taskKey, "Unsupported offline format")
-        val api = BookLoreApi(SessionStore(applicationContext))
+        val api = BookLoreApi(sessionStore)
         var lastProgressWriteMs = 0L
         try {
             when {
@@ -68,6 +70,15 @@ class OfflineDownloadWorker(
             )
             throw error
         } catch (error: Exception) {
+            if (sessionStore.readLocalMode()) {
+                dao.markFailed(
+                    taskKey = taskKey,
+                    status = OfflineDownloadStatus.PENDING.name,
+                    errorMessage = null,
+                    updatedAtMs = System.currentTimeMillis(),
+                )
+                return Result.retry()
+            }
             store.delete(task.bookId, task.bookFileId, task.bookType)
             return fail(dao, taskKey, error.message ?: "Download failed")
         }

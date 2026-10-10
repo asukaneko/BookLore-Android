@@ -102,6 +102,7 @@ import app.booklore.android.core.model.PendingAnnotationUpdate
 import app.booklore.android.core.model.ThemeColorOption
 import app.booklore.android.core.model.UpdateAnnotationRequest
 import app.booklore.android.core.offline.OfflineBookStore
+import app.booklore.android.core.offline.isReadableBookFile
 import app.booklore.android.core.model.displayTitle
 import app.booklore.android.core.model.supportsEpubReader
 import app.booklore.android.core.model.toArgbColorOrNull
@@ -1313,8 +1314,8 @@ private class EpubReaderViewModel(
         _state.value = EpubReaderUiState.Loading
         viewModelScope.launch(Dispatchers.IO) {
             // Reuse the previously downloaded copy when it is still readable.
-            val fromOffline = offlineFile?.exists() == true && offlineFile.hasZipSignature()
-            val fromCache = !fromOffline && cacheFile.exists() && cacheFile.hasZipSignature()
+            val fromOffline = offlineFile?.let(::isReadableBookFile) == true
+            val fromCache = !fromOffline && isReadableBookFile(cacheFile)
             var usingStreaming = false
             try {
                 val asset = when {
@@ -1361,24 +1362,24 @@ private class EpubReaderViewModel(
             } catch (error: Exception) {
                 publication?.close()
                 publication = null
-                if (fromOffline) {
+                if (fromOffline && !sessionStore.readLocalMode()) {
                     offlineFile?.delete()
                     openPublication()
                     return@launch
                 }
-                if (fromCache) {
+                if (fromCache && !sessionStore.readLocalMode()) {
                     // The cached copy turned out unreadable — drop it and download fresh once.
                     cacheFile.delete()
                     openPublication()
                     return@launch
                 }
-                if (preferStreaming) {
+                if (preferStreaming && !sessionStore.readLocalMode()) {
                     // Range support and remote EPUB parsing vary by server. Fall back to the
                     // proven full-download reader path before surfacing an error to the user.
                     openPublication(preferStreaming = false)
                     return@launch
                 }
-                if (error !is NetworkException && error !is ApiException) {
+                if (!sessionStore.readLocalMode() && error !is NetworkException && error !is ApiException) {
                     cacheFile.delete()
                 }
                 _state.value = EpubReaderUiState.Error(error.toReaderError())
@@ -1486,6 +1487,11 @@ private class EpubReaderViewModel(
                     database.annotationDao().insertAll(listOf(updated.toEntity()))
                 } catch (_: Exception) {
                     runCatching { pendingSyncQueue.enqueueAnnotationUpdate(PendingAnnotationUpdate(annotationId, request)) }
+                    _annotations.value.firstOrNull { it.id == annotationId }?.let { annotation ->
+                        database.annotationDao().insertAll(
+                            listOf(annotation.copy(color = request.color, style = request.style, note = request.note).toEntity()),
+                        )
+                    }
                 }
             } else if (cfi != null) {
                 // Local-only annotation: overwrite the queued create payload
@@ -1531,6 +1537,7 @@ private class EpubReaderViewModel(
     }
 
     private fun clearExpiredReaderFiles() {
+        if (sessionStore.readLocalMode()) return
         val files = readerDirectory.listFiles()?.filter(File::isFile) ?: return
         val now = System.currentTimeMillis()
         // Evict copies untouched beyond the retention window, then enforce the

@@ -1,6 +1,8 @@
 package app.booklore.android
 
 import android.os.Bundle
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
@@ -38,6 +40,11 @@ class MainActivity : ComponentActivity() {
                         database,
                         OfflineBookStore(applicationContext),
                     ),
+                    isNetworkAvailable = {
+                        val manager = getSystemService(ConnectivityManager::class.java)
+                        manager.getNetworkCapabilities(manager.activeNetwork)
+                            ?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+                    },
                 ) as T
             }
         }

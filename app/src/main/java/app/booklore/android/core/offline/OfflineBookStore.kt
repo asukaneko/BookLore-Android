@@ -12,6 +12,9 @@ import kotlinx.coroutines.withContext
 /** A durable, user-managed copy of a book that can be opened without a server connection. */
 class OfflineBookStore(context: Context) {
     private val directory = File(context.applicationContext.filesDir, DIRECTORY_NAME)
+    private val localBookFiles = LocalBookFiles(context.applicationContext.filesDir)
+
+    fun localBookIds(books: List<Book>): Set<Long> = localBookFiles.availableBookIds(books)
 
     fun fileFor(book: Book): File? {
         val bookFile = book.primaryFile ?: return null

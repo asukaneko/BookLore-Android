@@ -68,6 +68,14 @@ class OfflineDownloadQueue(
         )
     }
 
+    suspend fun resumePending() {
+        database.downloadTaskDao().all()
+            .filter { it.status == OfflineDownloadStatus.PENDING.name }
+            .forEach { task ->
+                enqueueTask(task.copy(status = OfflineDownloadStatus.PENDING.name, updatedAtMs = System.currentTimeMillis()))
+            }
+    }
+
     private suspend fun enqueueTask(task: DownloadTaskEntity) {
         database.downloadTaskDao().upsert(task)
         workManager.enqueueUniqueWork(

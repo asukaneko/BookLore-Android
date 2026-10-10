@@ -230,6 +230,10 @@ fun BookLoreApp(viewModel: AppViewModel) {
         viewModel.refreshCatalog()
     }
 
+    LaunchedEffect(state.localMode) {
+        if (state.localMode) catalogTab = 1
+    }
+
     LaunchedEffect(state.bookDetail?.id) {
         if (state.bookDetail == null) readerOpen = false
     }
@@ -254,13 +258,14 @@ fun BookLoreApp(viewModel: AppViewModel) {
     }
 
     when {
-        !state.authenticated -> ConnectionAndLoginScreen(
+        !state.authenticated && !state.localMode -> ConnectionAndLoginScreen(
             state = state,
             onTestConnection = viewModel::testConnection,
             onBackToConnection = viewModel::clearConnection,
             onLogin = viewModel::login,
             onQuickLogin = viewModel::quickLogin,
             onRemoveSavedLogin = viewModel::removeSavedLogin,
+            onEnterLocalMode = viewModel::enterLocalMode,
             onDismissMessage = viewModel::dismissMessage,
         )
 
@@ -289,6 +294,7 @@ fun BookLoreApp(viewModel: AppViewModel) {
                     onFontChanged = viewModel::setFont,
                     onFontScaleChanged = viewModel::setFontScale,
                     onSignOut = viewModel::signOut,
+                    onLocalModeChanged = viewModel::setLocalMode,
                     onRefreshSyncStatus = viewModel::refreshSyncStatus,
                     onSyncNow = viewModel::syncNow,
                     onCancelDownload = viewModel::cancelDownload,
@@ -297,7 +303,7 @@ fun BookLoreApp(viewModel: AppViewModel) {
                     onRefreshCache = viewModel::refreshCache,
                     onClearCache = viewModel::clearCache,
                     onRefreshStatistics = viewModel::refreshStatistics,
-                    downloadedBookIds = state.downloadedBookIds,
+                    downloadedBookIds = if (state.localMode) state.localBookIds else state.downloadedBookIds,
                     coverUrl = viewModel::coverUrl,
                     accessToken = viewModel.accessToken(),
                     serverUrl = viewModel.serverUrl(),
@@ -322,6 +328,7 @@ fun BookLoreApp(viewModel: AppViewModel) {
                             isActionRunning = state.isActionRunning,
                             shelves = state.shelves,
                             isOfflineAvailable = selectedBook.id in state.downloadedBookIds,
+                            localMode = state.localMode,
                             offlineDownloadTask = state.offlineDownloadTasks.firstOrNull { it.bookId == selectedBook.id },
                             onBack = viewModel::clearBookSelection,
                             onUpdateStatus = viewModel::updateReadStatus,
@@ -358,6 +365,7 @@ private fun ConnectionAndLoginScreen(
     onLogin: (String, String, Boolean) -> Unit,
     onQuickLogin: (SavedLogin) -> Unit,
     onRemoveSavedLogin: (SavedLogin) -> Unit,
+    onEnterLocalMode: () -> Unit,
     onDismissMessage: () -> Unit,
 ) {
     var serverUrl by rememberSaveable { mutableStateOf("") }
@@ -433,6 +441,7 @@ private fun ConnectionAndLoginScreen(
                     ) {
                         BusyLabel(state.isBusy, R.string.test_connection)
                     }
+                    LocalModeEntry(onEnterLocalMode)
                     if (state.savedLogins.isNotEmpty()) {
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         Text(
@@ -461,6 +470,7 @@ private fun ConnectionAndLoginScreen(
                     onRememberAccountChange = { rememberAccount = it },
                     isBusy = state.isBusy,
                     onLogin = { onLogin(username, password, rememberAccount) },
+                    onEnterLocalMode = onEnterLocalMode,
                 )
             }
         }
@@ -535,6 +545,7 @@ private fun LoginForm(
     onRememberAccountChange: (Boolean) -> Unit,
     isBusy: Boolean,
     onLogin: () -> Unit,
+    onEnterLocalMode: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -602,7 +613,22 @@ private fun LoginForm(
         ) {
             BusyLabel(isBusy, R.string.sign_in)
         }
+        LocalModeEntry(onEnterLocalMode)
     }
+}
+
+@Composable
+private fun LocalModeEntry(onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+        Icon(Icons.Filled.CloudOff, contentDescription = null)
+        Spacer(Modifier.width(8.dp))
+        Text(stringResource(R.string.enter_local_mode))
+    }
+    Text(
+        text = stringResource(R.string.local_mode_summary),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -620,6 +646,7 @@ private fun CatalogScreen(
     onFontChanged: (FontOption) -> Unit,
     onFontScaleChanged: (Float) -> Unit,
     onSignOut: () -> Unit,
+    onLocalModeChanged: (Boolean) -> Unit,
     onRefreshSyncStatus: () -> Unit,
     onSyncNow: () -> Unit,
     onCancelDownload: (OfflineDownloadTask) -> Unit,
@@ -656,7 +683,7 @@ private fun CatalogScreen(
     }
     val pageTitle = when (tab) {
         0 -> stringResource(R.string.reading_now)
-        1 -> stringResource(R.string.libraries)
+        1 -> stringResource(if (state.localMode) R.string.local_library else R.string.libraries)
         2 -> stringResource(R.string.navigation_series)
         else -> stringResource(R.string.settings)
     }
@@ -673,6 +700,12 @@ private fun CatalogScreen(
     val contentTitleAlpha = 1f - titleScrollProgress
     val toolbarTitleAlpha = ((titleScrollProgress - ToolbarTitleFadeStart) / (1f - ToolbarTitleFadeStart))
         .coerceIn(0f, 1f)
+
+    LaunchedEffect(state.localMode) {
+        selectedLibraryId = null
+        selectedSeriesTitle = null
+        if (state.localMode) statisticsOpen = false
+    }
 
     BackHandler(enabled = appearanceEditorOpen || statisticsOpen || cacheOpen || offlineDownloadsOpen || searchOpen) {
         appearanceEditorOpen = false
@@ -730,6 +763,7 @@ private fun CatalogScreen(
             )
             3 -> OfflineDownloadsScreen(
                 tasks = state.offlineDownloadTasks,
+                online = !state.localMode,
                 onBack = { offlineDownloadsOpen = false },
                 onCancelDownload = onCancelDownload,
                 onRetryDownload = onRetryDownload,
@@ -779,7 +813,7 @@ private fun CatalogScreen(
                         },
                         actions = {
                             when (tab) {
-                                0 -> IconButton(onClick = { statisticsOpen = true }) {
+                                0 -> IconButton(onClick = { statisticsOpen = true }, enabled = !state.localMode) {
                                     Icon(
                                         imageVector = Icons.Filled.BarChart,
                                         contentDescription = stringResource(R.string.content_description_open_statistics),
@@ -787,7 +821,7 @@ private fun CatalogScreen(
                                 }
                                 1 -> IconButton(
                                     onClick = { onRescanLibraries(selectedLibraryId) },
-                                    enabled = !state.isBusy,
+                                    enabled = !state.isBusy && !state.localMode,
                                 ) {
                                     Icon(
                                         imageVector = Icons.Filled.Refresh,
@@ -818,10 +852,10 @@ private fun CatalogScreen(
                             icon = {
                                 Icon(
                                     Icons.AutoMirrored.Filled.LibraryBooks,
-                                    contentDescription = stringResource(R.string.navigation_libraries),
+                                    contentDescription = stringResource(if (state.localMode) R.string.local_library else R.string.navigation_libraries),
                                 )
                             },
-                            label = { Text(stringResource(R.string.navigation_libraries)) },
+                            label = { Text(stringResource(if (state.localMode) R.string.local_library else R.string.navigation_libraries)) },
                             alwaysShowLabel = false,
                         )
                         NavigationBarItem(
@@ -854,11 +888,13 @@ private fun CatalogScreen(
             ) { padding ->
                 Column(modifier = Modifier.fillMaxSize().padding(padding)) {
                     AnimatedVisibility(visible = state.offline) {
-                        OfflineBanner(onRefresh = onRefresh)
+                        OfflineBanner(bookCount = state.books.size, onConnect = { onLocalModeChanged(false) })
                     }
                     Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                         if (state.isBusy && state.books.isEmpty()) {
                             LoadingState()
+                        } else if (state.localMode && state.books.isEmpty() && tab != 3) {
+                            LocalLibraryEmptyState(onConnect = { onLocalModeChanged(false) })
                         } else {
                         AnimatedContent(
                             targetState = tab,
@@ -899,7 +935,7 @@ private fun CatalogScreen(
                                     coverUrl = coverUrl,
                                     accessToken = accessToken,
                                     gridState = collectionGridState,
-                                    pageTitle = stringResource(R.string.libraries),
+                                    pageTitle = stringResource(if (state.localMode) R.string.local_library else R.string.libraries),
                                     pageTitleAlpha = contentTitleAlpha,
                                     compactBookGrid = compactBookGrid,
                                     downloadedBookIds = downloadedBookIds,
@@ -919,6 +955,8 @@ private fun CatalogScreen(
                                 )
                                 else -> SettingsCatalog(
                                     serverUrl = serverUrl,
+                                    localMode = state.localMode,
+                                    onLocalModeChanged = onLocalModeChanged,
                                     compactBookGrid = compactBookGrid,
                                     syncStatus = state.syncStatus,
                                     onCompactBookGridChanged = onCompactBookGridChanged,
@@ -945,18 +983,17 @@ private fun CatalogScreen(
 }
 
 @Composable
-private fun OfflineBanner(onRefresh: () -> Unit) {
+private fun OfflineBanner(bookCount: Int, onConnect: () -> Unit) {
     Surface(
         modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onRefresh),
-        color = MaterialTheme.colorScheme.errorContainer,
-        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+            .fillMaxWidth(),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+                .padding(horizontal = 16.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -966,10 +1003,33 @@ private fun OfflineBanner(onRefresh: () -> Unit) {
                 modifier = Modifier.size(18.dp),
             )
             Text(
-                text = stringResource(R.string.offline_banner),
+                text = stringResource(R.string.local_mode_book_count, bookCount),
+                modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodySmall,
             )
+            TextButton(onClick = onConnect) { Text(stringResource(R.string.go_online)) }
         }
+    }
+}
+
+@Composable
+private fun LocalLibraryEmptyState(onConnect: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(Icons.Filled.CloudOff, contentDescription = null, modifier = Modifier.size(40.dp))
+        Spacer(Modifier.height(16.dp))
+        Text(stringResource(R.string.local_library_empty), style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            stringResource(R.string.local_library_empty_summary),
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(16.dp))
+        OutlinedButton(onClick = onConnect) { Text(stringResource(R.string.go_online)) }
     }
 }
 
@@ -3572,6 +3632,7 @@ private fun BookDetailScreen(
     isActionRunning: Boolean,
     shelves: List<Shelf>,
     isOfflineAvailable: Boolean,
+    localMode: Boolean,
     offlineDownloadTask: OfflineDownloadTask?,
     onBack: () -> Unit,
     onUpdateStatus: (Long, String) -> Unit,
@@ -3632,11 +3693,11 @@ private fun BookDetailScreen(
                 }
                 item {
                     Text(stringResource(R.string.reading_status), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    StatusChips(selected = book.readStatus, enabled = !isActionRunning) { status -> onUpdateStatus(book.id, status) }
+                    StatusChips(selected = book.readStatus, enabled = !isActionRunning && !localMode) { status -> onUpdateStatus(book.id, status) }
                 }
                 item {
                     Text(stringResource(R.string.personal_rating), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    RatingChips(selected = book.personalRating, enabled = !isActionRunning) { rating -> onUpdateRating(book.id, rating) }
+                    RatingChips(selected = book.personalRating, enabled = !isActionRunning && !localMode) { rating -> onUpdateRating(book.id, rating) }
                 }
                 if (shelves.isNotEmpty()) {
                     item {
@@ -3644,7 +3705,7 @@ private fun BookDetailScreen(
                         ShelfChips(
                             allShelves = shelves,
                             bookShelfIds = book.shelves.map(Shelf::id).toSet(),
-                            enabled = !isActionRunning,
+                            enabled = !isActionRunning && !localMode,
                         ) { shelfId, selected ->
                             val assign = if (selected) setOf(shelfId) else emptySet()
                             val unassign = if (selected) emptySet() else setOf(shelfId)
@@ -3658,7 +3719,15 @@ private fun BookDetailScreen(
                         style = MaterialTheme.typography.bodyLarge,
                     )
                 }
-                if (book.supportsEpubReader() || book.supportsPdfReader()) {
+                if (localMode) {
+                    item {
+                        Text(
+                            stringResource(if (isOfflineAvailable) R.string.downloaded else R.string.cached_for_reading),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                } else if (book.supportsEpubReader() || book.supportsPdfReader()) {
                     item {
                         OfflineDownloadControl(
                             isDownloaded = isOfflineAvailable,
@@ -3780,6 +3849,8 @@ private fun ReaderPreparationScreen(
 @Composable
 private fun SettingsCatalog(
     serverUrl: String?,
+    localMode: Boolean,
+    onLocalModeChanged: (Boolean) -> Unit,
     compactBookGrid: Boolean,
     syncStatus: SyncStatus,
     offlineDownloadTasks: List<OfflineDownloadTask>,
@@ -3829,6 +3900,17 @@ private fun SettingsCatalog(
                         Text(stringResource(R.string.server_address), style = MaterialTheme.typography.labelLarge)
                         Text(url, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                }
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(stringResource(R.string.local_mode), style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            stringResource(R.string.local_mode_summary),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = localMode, onCheckedChange = onLocalModeChanged)
                 }
                 Text(stringResource(R.string.storage), style = MaterialTheme.typography.titleMedium, fontWeight = PageTitleFontWeight)
                 Row(
@@ -3888,7 +3970,7 @@ private fun SettingsCatalog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = onSyncNow)
+                        .clickable(enabled = !localMode, onClick = onSyncNow)
                         .padding(vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -3948,7 +4030,9 @@ private fun SettingsCatalog(
                     Switch(checked = compactBookGrid, onCheckedChange = onCompactBookGridChanged)
                 }
                 HorizontalDivider()
-                OutlinedButton(onClick = onSignOut) { Text(stringResource(R.string.sign_out)) }
+                if (serverUrl != null) {
+                    OutlinedButton(onClick = onSignOut) { Text(stringResource(R.string.sign_out)) }
+                }
             }
         }
     }
@@ -3958,6 +4042,7 @@ private fun SettingsCatalog(
 @Composable
 private fun OfflineDownloadsScreen(
     tasks: List<OfflineDownloadTask>,
+    online: Boolean,
     onBack: () -> Unit,
     onCancelDownload: (OfflineDownloadTask) -> Unit,
     onRetryDownload: (OfflineDownloadTask) -> Unit,
@@ -3998,6 +4083,7 @@ private fun OfflineDownloadsScreen(
                 lazyListItems(tasks, key = OfflineDownloadTask::taskKey) { task ->
                     OfflineDownloadTaskRow(
                         task = task,
+                        online = online,
                         onCancel = { onCancelDownload(task) },
                         onRetry = { onRetryDownload(task) },
                         onDelete = { onDeleteDownload(task) },
@@ -4011,6 +4097,7 @@ private fun OfflineDownloadsScreen(
 @Composable
 private fun OfflineDownloadTaskRow(
     task: OfflineDownloadTask,
+    online: Boolean,
     onCancel: () -> Unit,
     onRetry: () -> Unit,
     onDelete: () -> Unit,
@@ -4051,7 +4138,7 @@ private fun OfflineDownloadTaskRow(
                 }
                 OfflineDownloadStatus.FAILED,
                 OfflineDownloadStatus.CANCELLED,
-                -> OutlinedButton(onClick = onRetry) {
+                -> OutlinedButton(onClick = onRetry, enabled = online) {
                     Icon(Icons.Filled.Refresh, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
                     Text(stringResource(R.string.retry_download))
@@ -4506,16 +4593,17 @@ private fun BookCover(bookId: Long, title: String, url: String?, accessToken: St
         this.value = null
         this.value = withContext(Dispatchers.IO) {
             val sessionStore = SessionStore(context.applicationContext)
-            val session = sessionStore.read()
-            if (session == null) {
+            val baseUrl = sessionStore.readCatalogBaseUrl()
+            if (baseUrl == null) {
                 null
             } else {
                 val cacheDirectory = File(context.cacheDir, "book-covers")
-                val destination = File(cacheDirectory, "${session.baseUrl.hashCode()}-$bookId.cover")
+                val destination = File(cacheDirectory, "${baseUrl.hashCode()}-$bookId.cover")
                 if (destination.isFile && destination.length() > 0L) {
                     destination
                 } else {
-                    runCatching { BookLoreApi(sessionStore).downloadCover(bookId, destination) }.getOrNull()
+                    if (sessionStore.readLocalMode()) null
+                    else runCatching { BookLoreApi(sessionStore).downloadCover(bookId, destination) }.getOrNull()
                 }
             }
         }
@@ -4664,6 +4752,7 @@ private fun UiError.message(): String = when (this) {
     UiError.Forbidden -> stringResource(R.string.error_forbidden)
     UiError.NotFound -> stringResource(R.string.error_not_found)
     UiError.Network -> stringResource(R.string.error_network)
+    UiError.LocalBookUnavailable -> stringResource(R.string.local_book_unavailable)
     UiError.Generic -> stringResource(R.string.error_generic)
 }
 

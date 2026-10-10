@@ -29,11 +29,13 @@ class ProgressSyncWorker(
 
     override suspend fun doWork(): Result {
         val sessionStore = SessionStore(applicationContext)
+        if (sessionStore.readLocalMode()) return Result.success()
         if (sessionStore.read() == null) return Result.success()
 
         val api = BookLoreApi(sessionStore)
         val dao = BookLoreDatabase.get(applicationContext).pendingSyncDao()
         for (entry in dao.all()) {
+            if (sessionStore.readLocalMode()) return Result.success()
             try {
                 when (entry.type) {
                     PendingSyncQueue.TYPE_PDF_PROGRESS ->

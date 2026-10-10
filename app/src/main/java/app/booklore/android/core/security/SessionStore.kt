@@ -40,6 +40,7 @@ class SessionStore(context: Context) {
     fun write(session: Session) = synchronized(Companion) {
         preferences.edit()
             .putString(KEY_BASE_URL, session.baseUrl)
+            .putString(KEY_CATALOG_BASE_URL, session.baseUrl)
             .putString(KEY_ACCESS_TOKEN, session.accessToken)
             .putString(KEY_REFRESH_TOKEN, session.refreshToken)
             .apply()
@@ -48,22 +49,35 @@ class SessionStore(context: Context) {
         Unit
     }
 
-    fun clear() = synchronized(Companion) {
+    fun clear(preserveReadingPositions: Boolean = false) = synchronized(Companion) {
         val editor = preferences.edit()
             .remove(KEY_BASE_URL)
             .remove(KEY_ACCESS_TOKEN)
             .remove(KEY_REFRESH_TOKEN)
-        preferences.all.keys
-            .filter {
-                it.startsWith(KEY_EPUB_POSITION_PREFIX) ||
-                    it.startsWith(KEY_PDF_POSITION_PREFIX)
-            }
-            .forEach(editor::remove)
+        if (preserveReadingPositions) {
+            preferences.getString(KEY_BASE_URL, null)?.let { editor.putString(KEY_CATALOG_BASE_URL, it) }
+        } else {
+            preferences.all.keys
+                .filter {
+                    it.startsWith(KEY_EPUB_POSITION_PREFIX) ||
+                        it.startsWith(KEY_PDF_POSITION_PREFIX)
+                }
+                .forEach(editor::remove)
+        }
         editor.apply()
         sessionCache = null
         sessionLoaded = true
         Unit
     }
+
+    fun readLocalMode(): Boolean = preferences.getBoolean(KEY_LOCAL_MODE, false)
+
+    fun writeLocalMode(enabled: Boolean) {
+        preferences.edit().putBoolean(KEY_LOCAL_MODE, enabled).apply()
+    }
+
+    fun readCatalogBaseUrl(): String? = preferences.getString(KEY_CATALOG_BASE_URL, null)
+        ?: read()?.baseUrl
 
     @Synchronized
     fun readSavedLogins(): List<SavedLogin> {
@@ -265,6 +279,8 @@ class SessionStore(context: Context) {
             }
 
         const val KEY_BASE_URL = "base_url"
+        const val KEY_CATALOG_BASE_URL = "catalog_base_url"
+        const val KEY_LOCAL_MODE = "local_mode"
         const val KEY_ACCESS_TOKEN = "access_token"
         const val KEY_REFRESH_TOKEN = "refresh_token"
         const val KEY_SAVED_LOGINS = "saved_logins"

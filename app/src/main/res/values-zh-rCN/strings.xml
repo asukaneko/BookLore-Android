@@ -301,4 +301,14 @@
     <string name="offline_downloads_active_count">&#x6B63;&#x5728;&#x4E0B;&#x8F7D; %1$d &#x672C;</string>
     <string name="offline_downloads_task_count">&#x5171; %1$d &#x4E2A;&#x4E0B;&#x8F7D;&#x4EFB;&#x52A1;</string>
     <string name="content_description_open_offline_downloads">&#x6253;&#x5F00;&#x79BB;&#x7EBF;&#x4E0B;&#x8F7D;</string>
+    <string name="local_mode">本地模式</string>
+    <string name="enter_local_mode">进入本地模式</string>
+    <string name="local_mode_summary">无需连接服务器，即可阅读已下载或完整缓存的 EPUB、PDF 书籍。</string>
+    <string name="local_library">本地书库</string>
+    <string name="local_mode_book_count">本地模式 · %1$d 本书</string>
+    <string name="go_online">切回在线</string>
+    <string name="local_library_empty">还没有保存到本机的书籍</string>
+    <string name="local_library_empty_summary">连接服务器后下载书籍，或等阅读缓存完整保存后，再离线阅读。</string>
+    <string name="cached_for_reading">已缓存，可离线阅读</string>
+    <string name="local_book_unavailable">这本书还没有完整的本地文件，请连接服务器后下载。</string>
 </resources>

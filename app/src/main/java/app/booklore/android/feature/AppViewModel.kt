@@ -9,9 +9,10 @@ import app.booklore.android.core.database.CatalogMappers.toEntity
 import app.booklore.android.core.database.CatalogMappers.toModel
 import app.booklore.android.core.model.Book
 import app.booklore.android.core.model.DisplaySettings
+import app.booklore.android.core.model.EpubProgress
+import app.booklore.android.core.model.PdfProgress
 import app.booklore.android.core.model.FontOption
 import app.booklore.android.core.model.Library
-import app.booklore.android.core.model.PublicSettings
 import app.booklore.android.core.model.ReadingStatistics
 import app.booklore.android.core.model.SavedLogin
 import app.booklore.android.core.model.ServerConnection
@@ -24,12 +25,13 @@ import app.booklore.android.core.network.BookLoreApi
 import app.booklore.android.core.network.NetworkException
 import app.booklore.android.core.offline.OfflineBookStore
 import app.booklore.android.core.offline.OfflineDownloadQueue
-import app.booklore.android.core.offline.OfflineDownloadStatus
 import app.booklore.android.core.offline.OfflineDownloadTask
 import app.booklore.android.core.offline.toModel
 import app.booklore.android.core.security.SessionStore
 import app.booklore.android.sync.PendingSyncQueue
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -47,34 +49,40 @@ class AppViewModel(
     private val cacheManager: CacheManager,
     private val offlineBookStore: OfflineBookStore,
     private val offlineDownloadQueue: OfflineDownloadQueue,
+    private val isNetworkAvailable: () -> Boolean = { true },
 ) : ViewModel() {
     private val _state = MutableStateFlow(newUiState())
     val state: StateFlow<AppUiState> = _state.asStateFlow()
+    private var catalogJob: Job? = null
 
     init {
         viewModelScope.launch {
             offlineDownloadQueue.observeTasks().collect { entities ->
                 val tasks = entities.map { it.toModel() }
+                val books = _state.value.books
+                val downloaded = io { offlineBookStore.downloadedBookIds(books) }
+                val local = io { offlineBookStore.localBookIds(books) }
                 _state.update {
                     it.copy(
                         offlineDownloadTasks = tasks,
-                        downloadedBookIds = it.downloadedBookIds + tasks
-                            .filter { task -> task.status == OfflineDownloadStatus.COMPLETED }
-                            .map(OfflineDownloadTask::bookId),
+                        downloadedBookIds = if (it.books == books) downloaded else it.downloadedBookIds,
+                        localBookIds = if (it.books == books) local else it.localBookIds,
                     )
                 }
             }
         }
-        if (sessionStore.read() != null) {
+        if (sessionStore.readLocalMode() || (sessionStore.read() != null && !isNetworkAvailable())) {
+            enterLocalMode()
+        } else if (sessionStore.read() != null) {
             // Opportunistically flush any progress queued while offline.
-            pendingSyncQueue.schedule()
+            if (isNetworkAvailable()) pendingSyncQueue.schedule()
             refreshCatalog()
             refreshSyncStatus()
-            refreshOfflineBooks()
         }
     }
 
     fun testConnection(url: String, allowHttp: Boolean) = runRequest {
+        sessionStore.writeLocalMode(false)
         _state.update { it.copy(isBusy = true, error = null, connection = null) }
         val connection = io { api.probe(url, allowHttp) }
         _state.update { it.copy(isBusy = false, connection = connection) }
@@ -152,14 +160,52 @@ class AppViewModel(
         _state.update { it.copy(savedLogins = sessionStore.readSavedLogins()) }
     }
 
-    fun refreshCatalog() = runRequest {
-        _state.update { it.copy(isBusy = true, authenticated = sessionStore.read() != null, error = null, offline = false) }
-        loadCatalog()
-        refreshOfflineBooks()
+    fun refreshCatalog() {
+        catalogJob?.cancel()
+        catalogJob = runRequest {
+            if (_state.value.localMode) {
+                loadCachedCatalog()
+            } else if (sessionStore.read() != null) {
+                _state.update { it.copy(isBusy = true, authenticated = true, error = null) }
+                // Display the saved catalog immediately while checking the server.
+                loadCachedCatalog(localOnly = false)
+                _state.update { it.copy(isBusy = true) }
+                loadCatalog()
+            }
+        }
+    }
+
+    fun setLocalMode(enabled: Boolean) {
+        if (enabled) {
+            enterLocalMode()
+        } else {
+            catalogJob?.cancel()
+            sessionStore.writeLocalMode(false)
+            _state.update {
+                it.copy(localMode = false, offline = false, bookDetail = null, error = null)
+            }
+            if (sessionStore.read() != null) {
+                pendingSyncQueue.schedule(replaceExisting = true)
+                runRequest { offlineDownloadQueue.resumePending() }
+                refreshCatalog()
+            } else {
+                _state.value = newUiState()
+            }
+        }
+    }
+
+    fun enterLocalMode() {
+        catalogJob?.cancel()
+        sessionStore.writeLocalMode(true)
+        _state.update {
+            it.copy(localMode = true, offline = true, isBusy = true, bookDetail = null, error = null)
+        }
+        catalogJob = runRequest { loadCachedCatalog() }
     }
 
     /** Runs the server-side scan for the selected library, or every visible library when null. */
     fun rescanLibraries(selectedLibraryId: Long?) = runRequest {
+        if (_state.value.localMode) return@runRequest
         val librariesToScan = _state.value.libraries.filter { library ->
             selectedLibraryId == null || library.id == selectedLibraryId
         }
@@ -170,6 +216,7 @@ class AppViewModel(
     }
 
     fun refreshStatistics(year: Int = Year.now().value) {
+        if (_state.value.localMode) return
         viewModelScope.launch {
             _state.update { it.copy(isStatisticsLoading = true, statisticsError = null) }
             try {
@@ -183,7 +230,7 @@ class AppViewModel(
             } catch (error: Exception) {
                 val uiError = error.toUiError()
                 if (uiError == UiError.Unauthorized && sessionStore.read() != null) {
-                    sessionStore.clear()
+                    sessionStore.clear(preserveReadingPositions = true)
                     _state.value = newUiState(error = UiError.Unauthorized)
                     return@launch
                 }
@@ -198,7 +245,22 @@ class AppViewModel(
     }
 
     fun selectBook(bookId: Long) = runRequest {
+        if (!_state.value.localMode && !isNetworkAvailable()) {
+            catalogJob?.cancel()
+            sessionStore.writeLocalMode(true)
+            loadCachedCatalog()
+        }
         val cachedBook = _state.value.books.firstOrNull { it.id == bookId }
+        if (_state.value.localMode) {
+            _state.update {
+                it.copy(
+                    bookDetail = cachedBook,
+                    isDetailLoading = false,
+                    error = if (cachedBook == null) UiError.LocalBookUnavailable else null,
+                )
+            }
+            return@runRequest
+        }
         _state.update {
             it.copy(
                 bookDetail = cachedBook,
@@ -212,6 +274,8 @@ class AppViewModel(
             // Offline: fall back to the cached book summary (no full description).
             cachedBook ?: throw error
         }
+        if (_state.value.localMode) return@runRequest
+        io { database.catalogDao().insertBooks(listOf(book.toEntity())) }
         _state.update { it.copy(bookDetail = book, isDetailLoading = false) }
     }
 
@@ -289,6 +353,7 @@ class AppViewModel(
 
     /** Downloads a supported book into durable private storage for offline reading. */
     fun downloadBook(book: Book) {
+        if (_state.value.localMode) return
         if (offlineBookStore.isDownloaded(book)) return
         if (book.primaryFile?.id == null || (!book.supportsEpubReader() && !book.supportsPdfReader())) return
         viewModelScope.launch {
@@ -315,6 +380,7 @@ class AppViewModel(
     }
 
     fun retryDownload(task: OfflineDownloadTask) {
+        if (_state.value.localMode) return
         viewModelScope.launch {
             runCatching { offlineDownloadQueue.retry(task) }
                 .onFailure { error -> _state.update { it.copy(error = (error as? Exception ?: Exception(error)).toUiError()) } }
@@ -330,6 +396,7 @@ class AppViewModel(
         viewModelScope.launch {
             io { offlineBookStore.delete(book) }
             _state.update { it.copy(downloadedBookIds = it.downloadedBookIds - book.id, notice = Notice.DownloadDeleted) }
+            refreshCatalogIfLocal()
         }
     }
 
@@ -337,12 +404,18 @@ class AppViewModel(
         viewModelScope.launch {
             io { offlineDownloadQueue.delete(task) }
             _state.update { it.copy(downloadedBookIds = it.downloadedBookIds - task.bookId, notice = Notice.DownloadDeleted) }
+            refreshCatalogIfLocal()
         }
     }
 
     fun refreshOfflineBooks() = runRequest {
         val downloaded = io { offlineBookStore.downloadedBookIds(_state.value.books) }
-        _state.update { it.copy(downloadedBookIds = downloaded) }
+        val local = io { offlineBookStore.localBookIds(_state.value.books) }
+        _state.update { it.copy(downloadedBookIds = downloaded, localBookIds = local) }
+    }
+
+    private fun refreshCatalogIfLocal() {
+        if (_state.value.localMode) refreshCatalog() else refreshOfflineBooks()
     }
 
     fun dismissMessage() {
@@ -362,6 +435,7 @@ class AppViewModel(
 
     /** Requests an immediate background flush of the offline queue. */
     fun syncNow() = runRequest {
+        if (_state.value.localMode) return@runRequest
         pendingSyncQueue.schedule()
         // The flush runs in WorkManager; re-read the queue after it had a chance to drain.
         kotlinx.coroutines.delay(3_000)
@@ -388,8 +462,8 @@ class AppViewModel(
                     libraries = emptyList(),
                     shelves = emptyList(),
                     bookDetail = null,
-                    offline = false,
                     downloadedBookIds = emptySet(),
+                    localBookIds = emptySet(),
                     cacheSnapshot = snapshot,
                     isCacheLoading = false,
                     notice = Notice.CacheCleared,
@@ -422,16 +496,22 @@ class AppViewModel(
         io { pendingSyncQueue.clear() }
         io { database.catalogDao().clearCatalog() }
         io { offlineBookStore.clear() }
+        sessionStore.writeLocalMode(false)
         _state.value = newUiState()
     }
 
-    fun coverUrl(bookId: Long): String? = api.coverUrl(bookId)
+    fun coverUrl(bookId: Long): String? = if (_state.value.localMode) null else api.coverUrl(bookId)
 
     fun accessToken(): String? = sessionStore.read()?.accessToken
 
     fun serverUrl(): String? = sessionStore.read()?.baseUrl
 
     private suspend fun loadCatalog() {
+        if (!isNetworkAvailable()) {
+            sessionStore.writeLocalMode(true)
+            loadCachedCatalog()
+            return
+        }
         val libraries: List<Library>
         val shelves: List<Shelf>
         val books: List<Book>
@@ -440,18 +520,25 @@ class AppViewModel(
             shelves = io { api.shelves() }
             books = io { api.books() }
         } catch (error: NetworkException) {
-            // Offline: serve the cached catalog instead of an error screen.
-            if (!loadCachedCatalog()) throw error
+            sessionStore.writeLocalMode(true)
+            loadCachedCatalog()
             return
         }
+        if (sessionStore.readLocalMode()) return
         io {
+            // Keep metadata for local copies even if the book disappears from the server catalog.
+            val dao = database.catalogDao()
+            val serverIds = books.mapTo(mutableSetOf(), Book::id)
+            val savedBooks = dao.books().map { it.toModel() }.filter { it.id !in serverIds }
+            val savedIds = offlineBookStore.localBookIds(savedBooks)
             database.catalogDao().replaceCatalog(
                 libraries.map { it.toEntity() },
                 shelves.map { it.toEntity() },
-                books.map { it.toEntity() },
+                (books + savedBooks.filter { it.id in savedIds }).map { it.toEntity() },
             )
         }
         val downloaded = io { offlineBookStore.downloadedBookIds(books) }
+        val local = io { offlineBookStore.localBookIds(books) }
         _state.update {
             it.copy(
                 isBusy = false,
@@ -460,55 +547,73 @@ class AppViewModel(
                 shelves = shelves,
                 books = books,
                 downloadedBookIds = downloaded,
+                localBookIds = local,
+                localMode = false,
+                offline = false,
             )
         }
     }
 
-    /**
-     * Serves the Room snapshot when the network is unreachable. Returns false
-     * when no cache exists, so the caller can surface the original error.
-     */
-    private suspend fun loadCachedCatalog(): Boolean {
+    /** Local mode only exposes complete files that the built-in readers can open. */
+    private suspend fun loadCachedCatalog(localOnly: Boolean = true) {
         val dao = database.catalogDao()
-        if (io { dao.bookCount() } == 0) return false
         val libraries = io { dao.libraries().map { it.toModel() } }
         val shelves = io { dao.shelves().map { it.toModel() } }
-        val books = io { dao.books().map { it.toModel() } }
+        val catalog = io { dao.books().map { it.toModel() } }
+        val local = io { offlineBookStore.localBookIds(catalog) }
+        val books = io {
+            if (localOnly) catalog.filter { it.id in local }.map(::withLocalProgress) else catalog
+        }
         val downloaded = io { offlineBookStore.downloadedBookIds(books) }
         _state.update {
             it.copy(
                 isBusy = false,
-                authenticated = true,
-                offline = true,
-                libraries = libraries,
-                shelves = shelves,
+                authenticated = sessionStore.read() != null,
+                offline = localOnly,
+                localMode = localOnly,
+                libraries = if (localOnly) libraries.filter { library -> books.any { it.libraryId == library.id } } else libraries,
+                shelves = if (localOnly) shelves.filter { shelf -> books.any { book -> book.shelves.any { it.id == shelf.id } } } else shelves,
                 books = books,
                 downloadedBookIds = downloaded,
+                localBookIds = local,
+                bookDetail = it.bookDetail?.let { detail -> books.firstOrNull { it.id == detail.id } },
+                isDetailLoading = false,
             )
         }
-        return true
     }
 
-    private fun runRequest(block: suspend () -> Unit) {
-        viewModelScope.launch {
-            try {
-                block()
-            } catch (error: Exception) {
-                val uiError = error.toUiError()
-                if (uiError == UiError.Unauthorized && sessionStore.read() != null) {
-                    sessionStore.clear()
-                    _state.value = newUiState(error = UiError.Unauthorized)
-                    return@launch
-                }
-                _state.update {
-                    it.copy(
-                        isBusy = false,
-                        isDetailLoading = false,
-                        isActionRunning = false,
-                        isCacheLoading = false,
-                        error = uiError,
-                    )
-                }
+    private fun withLocalProgress(book: Book): Book {
+        val fileId = book.primaryFile?.id ?: return book
+        val epub = sessionStore.readEpubPosition(book.id, fileId).takeIf { book.supportsEpubReader() }
+        val pdf = sessionStore.readPdfPosition(book.id, fileId).takeIf { book.supportsPdfReader() }
+        val progress = epub?.progressPercent ?: pdf?.progressPercent ?: return book
+        return book.copy(
+            epubProgress = epub?.let { EpubProgress(it.cfi, it.href, it.progressPercent) } ?: book.epubProgress,
+            pdfProgress = pdf?.let { PdfProgress(it.page, it.progressPercent) } ?: book.pdfProgress,
+            readStatus = if (progress >= 99f) "READ" else if (progress > 0f) "READING" else book.readStatus,
+        )
+    }
+
+    private fun runRequest(block: suspend () -> Unit): Job = viewModelScope.launch {
+        try {
+            block()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            val uiError = error.toUiError()
+            if (uiError == UiError.Unauthorized && sessionStore.read() != null) {
+                sessionStore.clear(preserveReadingPositions = true)
+                _state.value = newUiState(error = UiError.Unauthorized)
+                return@launch
+            }
+            _state.update {
+                it.copy(
+                    isBusy = false,
+                    isDetailLoading = false,
+                    isActionRunning = false,
+                    isCacheLoading = false,
+                    error = uiError,
+                )
             }
         }
     }
@@ -520,6 +625,8 @@ class AppViewModel(
     }
 
     private fun newUiState(error: UiError? = null): AppUiState = AppUiState(
+        localMode = sessionStore.readLocalMode(),
+        offline = sessionStore.readLocalMode(),
         compactBookGrid = sessionStore.readCompactBookGrid(),
         displaySettings = sessionStore.readDisplaySettings(),
         savedLogins = sessionStore.readSavedLogins(),
@@ -547,6 +654,7 @@ data class AppUiState(
     val authenticated: Boolean = false,
     /** True while the catalog is served from the offline cache. */
     val offline: Boolean = false,
+    val localMode: Boolean = false,
     val connection: ServerConnection? = null,
     val savedLogins: List<SavedLogin> = emptyList(),
     val loginPrefill: SavedLogin? = null,
@@ -565,6 +673,7 @@ data class AppUiState(
     val error: UiError? = null,
     val notice: Notice? = null,
     val downloadedBookIds: Set<Long> = emptySet(),
+    val localBookIds: Set<Long> = emptySet(),
     val offlineDownloadTasks: List<OfflineDownloadTask> = emptyList(),
 )
 
@@ -575,6 +684,7 @@ sealed interface UiError {
     data object Forbidden : UiError
     data object NotFound : UiError
     data object Network : UiError
+    data object LocalBookUnavailable : UiError
     data object Generic : UiError
 }
 

@@ -350,6 +350,7 @@ class BookLoreApi(private val sessionStore: SessionStore) {
     }
 
     suspend fun downloadCover(bookId: Long, destination: File): File {
+        requireOnlineMode()
         val session = sessionStore.read() ?: throw ApiException(401, "No active session")
         val initial = downloadCover(session, bookId, destination)
         if (initial.code != 401) {
@@ -368,6 +369,7 @@ class BookLoreApi(private val sessionStore: SessionStore) {
         destination: File,
         onProgress: (bytesRead: Long, totalBytes: Long?) -> Unit,
     ): File {
+        requireOnlineMode()
         val session = sessionStore.read() ?: throw ApiException(401, "No active session")
         val initial = downloadBookContent(session, bookId, bookType, destination, onProgress)
         if (initial.code != 401) {
@@ -385,6 +387,7 @@ class BookLoreApi(private val sessionStore: SessionStore) {
         bookType: String,
         range: LongRange,
     ): BookContentRangeResponse {
+        requireOnlineMode()
         val session = sessionStore.read() ?: throw ApiException(401, "No active session")
         val initial = readBookRange(session, bookId, bookType, range)
         if (initial.code != 401) return initial.requireSuccess()
@@ -395,6 +398,7 @@ class BookLoreApi(private val sessionStore: SessionStore) {
 
     /** Sends a one-byte range request but closes the response before consuming its body. */
     private suspend fun probeBookRangeResponse(bookId: Long, bookType: String): BookContentRangeProbe {
+        requireOnlineMode()
         val session = sessionStore.read() ?: throw ApiException(401, "No active session")
         val initial = probeBookRange(session, bookId, bookType)
         if (initial.code != 401) return initial.requireSuccess()
@@ -570,6 +574,7 @@ class BookLoreApi(private val sessionStore: SessionStore) {
         method: String = "GET",
         body: JsonObject? = null,
     ): NetworkResponse {
+        requireOnlineMode()
         val session = sessionStore.read() ?: throw ApiException(401, "No active session")
         val initial = request(session.baseUrl, path, method, body, authenticated = true, accessToken = session.accessToken)
         if (initial.code != 401) return initial.requireSuccess()
@@ -597,6 +602,7 @@ class BookLoreApi(private val sessionStore: SessionStore) {
         authenticated: Boolean,
         accessToken: String? = null,
     ): NetworkResponse {
+        requireOnlineMode()
         val url = "$baseUrl$path".toHttpUrlOrNull() ?: throw IllegalArgumentException("Invalid request URL")
         val builder = Request.Builder().url(url).header("Accept", "application/json")
         if (authenticated && !accessToken.isNullOrBlank()) builder.header("Authorization", "Bearer $accessToken")
@@ -614,6 +620,10 @@ class BookLoreApi(private val sessionStore: SessionStore) {
         } catch (error: IOException) {
             throw NetworkException(error)
         }
+    }
+
+    private fun requireOnlineMode() {
+        if (sessionStore.readLocalMode()) throw NetworkException(IOException("Local mode is enabled"))
     }
 
     private fun <T> NetworkResponse.decode(serializer: KSerializer<T>): T = try {

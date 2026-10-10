@@ -85,6 +85,7 @@ import app.booklore.android.core.model.PdfReaderSettings
 import app.booklore.android.core.model.PdfReadingMode
 import app.booklore.android.core.model.BookFile
 import app.booklore.android.core.offline.OfflineBookStore
+import app.booklore.android.core.offline.isReadableBookFile
 import app.booklore.android.core.model.displayTitle
 import app.booklore.android.core.model.supportsPdfReader
 import app.booklore.android.core.database.BookLoreDatabase
@@ -750,8 +751,8 @@ private class PdfReaderViewModel(
                 val pageCount = withContext(rendererDispatcher) {
                     closeRenderer()
                     // Reuse the previously downloaded copy when it is still readable.
-                    val fromOffline = offlineFile?.exists() == true && offlineFile.hasPdfSignature()
-                    fromCache = !fromOffline && cacheFile.exists() && cacheFile.hasPdfSignature()
+                    val fromOffline = offlineFile?.let(::isReadableBookFile) == true
+                    fromCache = !fromOffline && isReadableBookFile(cacheFile)
                     val newDescriptor = when {
                         fromOffline -> {
                             offlineFile!!.setLastModified(System.currentTimeMillis())
@@ -803,24 +804,24 @@ private class PdfReaderViewModel(
                 if (usingStreaming) cacheBookInBackground()
             } catch (error: Exception) {
                 withContext(rendererDispatcher) { closeRenderer() }
-                if (offlineFile?.exists() == true && !fromCache) {
+                if (!sessionStore.readLocalMode() && offlineFile?.exists() == true && !fromCache) {
                     offlineFile.delete()
                     openDocument()
                     return@launch
                 }
-                if (fromCache) {
+                if (fromCache && !sessionStore.readLocalMode()) {
                     // The cached copy turned out unreadable — drop it and download fresh once.
                     cacheFile.delete()
                     openDocument()
                     return@launch
                 }
-                if (preferStreaming) {
+                if (preferStreaming && !sessionStore.readLocalMode()) {
                     // A server without range support, or a proxy-read failure, should never
                     // prevent the established full-download reader path from opening the book.
                     openDocument(preferStreaming = false)
                     return@launch
                 }
-                if (error !is NetworkException && error !is ApiException) {
+                if (!sessionStore.readLocalMode() && error !is NetworkException && error !is ApiException) {
                     cacheFile.delete()
                 }
                 _state.value = PdfReaderUiState.Error(error.toPdfReaderError())
@@ -868,6 +869,7 @@ private class PdfReaderViewModel(
     }
 
     private fun clearExpiredReaderFiles() {
+        if (sessionStore.readLocalMode()) return
         val files = readerDirectory.listFiles()?.filter(File::isFile) ?: return
         val now = System.currentTimeMillis()
         // Evict copies untouched beyond the retention window, then enforce the

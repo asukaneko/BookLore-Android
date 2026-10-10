@@ -14,6 +14,7 @@ import app.booklore.android.core.model.EpubPosition
 import app.booklore.android.core.model.PendingAnnotationUpdate
 import app.booklore.android.core.model.PdfPosition
 import app.booklore.android.core.model.ReadingSessionReport
+import app.booklore.android.core.security.SessionStore
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.Json
 
@@ -102,10 +103,11 @@ class PendingSyncQueue(
     }
 
     /** Requests a background flush while the network is connected. */
-    fun schedule() {
+    fun schedule(replaceExisting: Boolean = false) {
+        if (SessionStore(context).readLocalMode()) return
         WorkManager.getInstance(context).enqueueUniqueWork(
             UNIQUE_WORK_NAME,
-            ExistingWorkPolicy.KEEP,
+            if (replaceExisting) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
             OneTimeWorkRequestBuilder<ProgressSyncWorker>()
                 .setConstraints(
                     Constraints.Builder()
