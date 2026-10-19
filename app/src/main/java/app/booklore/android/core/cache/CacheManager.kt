@@ -33,13 +33,17 @@ class CacheManager(
 ) {
     private val appContext = context.applicationContext
     private val readerCacheDirectory = File(appContext.filesDir, "reader-cache")
+    private val coverDirectory = File(appContext.filesDir, "book-covers")
     private val offlineBookStore = OfflineBookStore(appContext)
 
     suspend fun snapshot(): CacheSnapshot = withContext(Dispatchers.IO) {
         val bookCount = database.catalogDao().bookCount()
         CacheSnapshot(
             buckets = listOf(
-                directoryBucket(CacheBucketId.COVER_IMAGES, appContext.cacheDir),
+                directoryBucket(CacheBucketId.COVER_IMAGES, appContext.cacheDir).let { cached ->
+                    val saved = directoryBucket(CacheBucketId.COVER_IMAGES, coverDirectory)
+                    cached.copy(bytes = cached.bytes + saved.bytes, itemCount = cached.itemCount + saved.itemCount)
+                },
                 directoryBucket(CacheBucketId.READER_FILES, readerCacheDirectory),
                 offlineBookStore.snapshot().let { storage ->
                     CacheBucket(CacheBucketId.OFFLINE_BOOKS, storage.bytes, storage.itemCount)
@@ -55,6 +59,7 @@ class CacheManager(
 
     suspend fun clear() = withContext(Dispatchers.IO) {
         clearDirectoryContents(appContext.cacheDir)
+        coverDirectory.deleteRecursively()
         readerCacheDirectory.deleteRecursively()
         offlineBookStore.clear()
         database.catalogDao().clearCatalog()

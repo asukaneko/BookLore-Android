@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -74,7 +75,6 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
@@ -88,11 +88,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -120,7 +117,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -139,10 +138,12 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.booklore.android.R
 import app.booklore.android.core.cache.CacheBucketId
+import app.booklore.android.core.cache.BookCoverStore
 import app.booklore.android.core.cache.CacheSnapshot
 import app.booklore.android.core.model.Book
 import app.booklore.android.core.model.DisplaySettings
@@ -187,7 +188,7 @@ import kotlin.math.sin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-private val InputFieldShape = RoundedCornerShape(12.dp)
+private val InputFieldShape = RoundedCornerShape(14.dp)
 private val TitleTransitionDistance = 72.dp
 private val PageTitleFontWeight = FontWeight.SemiBold
 private const val ToolbarTitleFadeStart = 0.78f
@@ -391,18 +392,15 @@ private fun ConnectionAndLoginScreen(
             if (state.connection == null) {
                 Column(
                     modifier = Modifier
+                        .widthIn(max = 520.dp)
                         .fillMaxWidth()
-                        .widthIn(max = 480.dp)
                         .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 24.dp),
+                        .padding(horizontal = 24.dp, vertical = 32.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.MenuBook,
-                        contentDescription = null,
-                        modifier = Modifier.size(48.dp),
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
+                    LibraryMark()
+                    Text(stringResource(R.string.app_name), style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
                     Text(
                         text = stringResource(R.string.connect_title),
                         style = MaterialTheme.typography.headlineMedium,
@@ -436,7 +434,7 @@ private fun ConnectionAndLoginScreen(
                     }
                     Button(
                         onClick = { onTestConnection(serverUrl, allowHttp) },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
                         enabled = serverUrl.isNotBlank() && !state.isBusy,
                     ) {
                         BusyLabel(state.isBusy, R.string.test_connection)
@@ -488,9 +486,9 @@ private fun SavedLoginCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(enabled = !isBusy, onClick = onClick),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        ),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
         Row(
             modifier = Modifier
@@ -549,19 +547,14 @@ private fun LoginForm(
 ) {
     Column(
         modifier = Modifier
+            .widthIn(max = 480.dp)
             .fillMaxWidth()
-            .widthIn(max = 400.dp)
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp),
+            .padding(horizontal = 24.dp, vertical = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Icon(
-            imageVector = Icons.AutoMirrored.Filled.MenuBook,
-            contentDescription = null,
-            modifier = Modifier.size(48.dp),
-            tint = MaterialTheme.colorScheme.primary,
-        )
+        LibraryMark()
         Text(stringResource(R.string.connection_ready), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
         connection.version?.let {
             Text(
@@ -801,16 +794,26 @@ private fun CatalogScreen(
                             }
                         },
                         title = {
-                            Text(
-                                text = toolbarPageTitle,
-                                modifier = Modifier.graphicsLayer {
-                                    alpha = if (tab == 2 && selectedSeriesTitle != null) 1f else toolbarTitleAlpha
-                                },
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                fontWeight = PageTitleFontWeight,
-                            )
+                            Box {
+                                if (selectedSeriesTitle == null || tab != 2) {
+                                    Text(stringResource(R.string.app_name),
+                                        modifier = Modifier.graphicsLayer { alpha = 1f - toolbarTitleAlpha },
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary)
+                                }
+                                Text(
+                                    text = toolbarPageTitle,
+                                    modifier = Modifier.graphicsLayer {
+                                        alpha = if (tab == 2 && selectedSeriesTitle != null) 1f else toolbarTitleAlpha
+                                    },
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    fontWeight = PageTitleFontWeight,
+                                )
+                            }
                         },
+                        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                         actions = {
                             when (tab) {
                                 0 -> IconButton(onClick = { statisticsOpen = true }, enabled = !state.localMode) {
@@ -833,56 +836,7 @@ private fun CatalogScreen(
                     )
                 },
                 bottomBar = {
-                    NavigationBar(modifier = Modifier.height(80.dp)) {
-                        NavigationBarItem(
-                            selected = tab == 0,
-                            onClick = { onTabSelected(0) },
-                            icon = {
-                                Icon(
-                                    Icons.AutoMirrored.Filled.MenuBook,
-                                    contentDescription = stringResource(R.string.navigation_reading),
-                                )
-                            },
-                            label = { Text(stringResource(R.string.navigation_reading)) },
-                            alwaysShowLabel = false,
-                        )
-                        NavigationBarItem(
-                            selected = tab == 1,
-                            onClick = { onTabSelected(1) },
-                            icon = {
-                                Icon(
-                                    Icons.AutoMirrored.Filled.LibraryBooks,
-                                    contentDescription = stringResource(if (state.localMode) R.string.local_library else R.string.navigation_libraries),
-                                )
-                            },
-                            label = { Text(stringResource(if (state.localMode) R.string.local_library else R.string.navigation_libraries)) },
-                            alwaysShowLabel = false,
-                        )
-                        NavigationBarItem(
-                            selected = tab == 2,
-                            onClick = { onTabSelected(2) },
-                            icon = {
-                                Icon(
-                                    Icons.Filled.CollectionsBookmark,
-                                    contentDescription = stringResource(R.string.content_description_series),
-                                )
-                            },
-                            label = { Text(stringResource(R.string.navigation_series)) },
-                            alwaysShowLabel = false,
-                        )
-                        NavigationBarItem(
-                            selected = tab == 3,
-                            onClick = { onTabSelected(3) },
-                            icon = {
-                                Icon(
-                                    Icons.Filled.Settings,
-                                    contentDescription = stringResource(R.string.content_description_settings),
-                                )
-                            },
-                            label = { Text(stringResource(R.string.settings)) },
-                            alwaysShowLabel = false,
-                        )
-                    }
+                    LibraryNavigationBar(tab, state.localMode, onTabSelected)
                 },
                 snackbarHost = { MessageHost(state, onDismissMessage) },
             ) { padding ->
@@ -1420,7 +1374,7 @@ private fun StatisticsPanel(
     title: String,
     content: @Composable () -> Unit,
 ) {
-    Card(shape = RoundedCornerShape(8.dp)) {
+    Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -2132,7 +2086,7 @@ private fun StatisticsDistributionPanel(
     total: Long,
     valueLabel: @Composable (StatisticDistribution) -> String = { it.count.toString() },
 ) {
-    Card(shape = RoundedCornerShape(8.dp)) {
+    Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -2386,121 +2340,74 @@ private fun String.toEpochDayOrNull(): Long? = runCatching {
 
 @Composable
 private fun ReadingNowScreen(
-    books: List<Book>,
-    onBookSelected: (Long) -> Unit,
-    onContinueReading: (Long) -> Unit,
-    coverUrl: (Long) -> String?,
-    accessToken: String?,
-    gridState: LazyGridState,
-    pageTitle: String,
-    pageTitleAlpha: Float,
-    compactBookGrid: Boolean,
+    books: List<Book>, onBookSelected: (Long) -> Unit, onContinueReading: (Long) -> Unit,
+    coverUrl: (Long) -> String?, accessToken: String?, gridState: LazyGridState,
+    pageTitle: String, pageTitleAlpha: Float, compactBookGrid: Boolean,
 ) {
     val currentBook = remember(books) {
-        books
-            .asSequence()
-            .filter { it.readStatus == "READING" }
-            .sortedByDescending { it.lastReadTime.orEmpty() }
-            .firstOrNull()
+        books.filter { it.readStatus == "READING" }.maxByOrNull { it.lastReadTime.orEmpty() }
     }
     val recentBooks = remember(books, currentBook?.id) {
-        books
-            .asSequence()
-            .filter { it.lastReadTime != null && it.id != currentBook?.id }
-            .sortedByDescending { it.lastReadTime }
-            .take(8)
-            .toList()
+        books.filter { it.lastReadTime != null && it.id != currentBook?.id }
+            .sortedByDescending { it.lastReadTime }.take(8)
     }
-
     LazyVerticalGrid(
-        // Same grid metrics as the library catalog; header/hero items span the full row.
-        columns = GridCells.Adaptive(minSize = if (compactBookGrid) 104.dp else 144.dp),
-        modifier = Modifier.fillMaxSize(),
-        state = gridState,
-        contentPadding = PaddingValues(bottom = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(if (compactBookGrid) 8.dp else 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        columns = GridCells.Adaptive(minSize = if (compactBookGrid) 96.dp else 140.dp),
+        modifier = Modifier.fillMaxSize(), state = gridState,
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (compactBookGrid) 10.dp else 16.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         item(span = { GridItemSpan(maxLineSpan) }) {
-            PageTitle(pageTitle, pageTitleAlpha)
+            PageTitle(pageTitle, pageTitleAlpha, stringResource(R.string.reading_home_subtitle), inset = 0.dp)
         }
-        if (currentBook != null) {
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                Text(
-                    text = stringResource(R.string.continue_reading),
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = PageTitleFontWeight,
-                )
-            }
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    BookCover(
-                        bookId = currentBook.id,
-                        title = currentBook.displayTitle(),
-                        url = coverUrl(currentBook.id),
-                        accessToken = accessToken,
-                        modifier = Modifier.width(120.dp).aspectRatio(0.68f),
-                    )
-                    Spacer(Modifier.width(20.dp))
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(
-                            currentBook.displayTitle(),
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = PageTitleFontWeight,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        currentBook.displayAuthors().takeIf(String::isNotBlank)?.let {
-                            Text(
-                                it,
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        LastReadText(currentBook)
-                        Spacer(Modifier.height(4.dp))
-                        Button(onClick = { onContinueReading(currentBook.id) }) {
-                            Text(stringResource(R.string.continue_reading))
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            if (currentBook != null) {
+                Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                    BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(18.dp)) {
+                        val coverWidth = if (maxWidth < 320.dp) 88.dp else 112.dp
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                            BookCover(currentBook.id, currentBook.displayTitle(), coverUrl(currentBook.id), accessToken,
+                                Modifier.width(coverWidth).aspectRatio(0.68f).shadow(3.dp, RoundedCornerShape(8.dp))
+                                    .clickable { onBookSelected(currentBook.id) })
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(stringResource(R.string.continue_reading), style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                                Text(currentBook.displayTitle(), style = MaterialTheme.typography.titleLarge,
+                                    maxLines = 3, overflow = TextOverflow.Ellipsis)
+                                currentBook.displayAuthors().takeIf(String::isNotBlank)?.let {
+                                    Text(it, style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                }
+                                LinearProgressIndicator(progress = { (currentBook.readingProgressPercent() / 100f).coerceIn(0f, 1f) },
+                                    modifier = Modifier.fillMaxWidth().height(4.dp),
+                                    trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                                LastReadText(currentBook)
+                                Button(onClick = { onContinueReading(currentBook.id) }, modifier = Modifier.heightIn(min = 48.dp)) {
+                                    Text(stringResource(R.string.continue_reading))
+                                }
+                            }
                         }
                     }
                 }
-            }
-        } else {
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                Text(
-                    text = stringResource(R.string.no_current_reading),
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            } else {
+                Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+                    Row(modifier = Modifier.padding(20.dp), horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Text(stringResource(R.string.no_current_reading), style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
             }
         }
         if (recentBooks.isNotEmpty()) {
             item(span = { GridItemSpan(maxLineSpan) }) {
-                Text(
-                    text = stringResource(R.string.recently_read),
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = PageTitleFontWeight,
-                )
+                Text(stringResource(R.string.recently_read), style = MaterialTheme.typography.titleLarge)
             }
             items(recentBooks, key = { it.id }) { book ->
-                BookCard(
-                    book = book,
-                    coverUrl = coverUrl(book.id),
-                    accessToken = accessToken,
-                    compact = compactBookGrid,
-                    onClick = { onBookSelected(book.id) },
-                )
+                BookCard(book, coverUrl(book.id), accessToken, compactBookGrid) { onBookSelected(book.id) }
             }
         }
     }
@@ -2605,10 +2512,10 @@ private fun SeriesCatalog(
                 horizontalArrangement = Arrangement.spacedBy(if (compactBookGrid) 12.dp else 16.dp),
                 verticalArrangement = Arrangement.spacedBy(if (compactBookGrid) 16.dp else 20.dp),
             ) {
-                item(span = { GridItemSpan(maxLineSpan) }) { PageTitle(pageTitle, pageTitleAlpha) }
+                item(span = { GridItemSpan(maxLineSpan) }) { PageTitle(pageTitle, pageTitleAlpha, inset = 0.dp) }
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Column(
-                        modifier = Modifier.padding(horizontal = 16.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         OutlinedTextField(
@@ -2661,10 +2568,11 @@ private fun SeriesCard(
     if (series.books.isEmpty()) return
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
     ) {
         Column(
-            modifier = Modifier.padding(if (compact) 6.dp else 8.dp),
+            modifier = Modifier.padding(3.dp),
             verticalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp),
         ) {
             SeriesCoverStack(
@@ -3255,15 +3163,15 @@ private fun LibraryCatalog(
                     onClick = onOpenSearch,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = 0.dp),
                     shape = InputFieldShape,
                     color = MaterialTheme.colorScheme.surface,
                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 )
                 {
                     Row(
-                        modifier = Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 16.dp),
+                        modifier = Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 0.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Icon(Icons.Filled.Search, contentDescription = null)
@@ -3272,10 +3180,19 @@ private fun LibraryCatalog(
                     }
                 }
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.End,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 0.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    OutlinedButton(onClick = { filtersOpen = true }) {
+                    Text(
+                        libraries.firstOrNull { it.id == selectedLibraryId }?.name ?: stringResource(R.string.filter_all),
+                        modifier = Modifier.weight(1f).padding(end = 12.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    OutlinedButton(onClick = { filtersOpen = true },
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
                         Icon(Icons.Filled.FilterList, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
                         Text(stringResource(R.string.filter_action))
@@ -3539,15 +3456,15 @@ private fun BookGrid(
 ) {
     LazyVerticalGrid(
         // Compact cells (104dp) fit three columns on common phone widths.
-        columns = GridCells.Adaptive(minSize = if (compactBookGrid) 104.dp else 144.dp),
+        columns = GridCells.Adaptive(minSize = if (compactBookGrid) 96.dp else 140.dp),
         modifier = Modifier.fillMaxSize(),
         state = gridState,
-        contentPadding = PaddingValues(bottom = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(if (compactBookGrid) 8.dp else 12.dp),
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (compactBookGrid) 10.dp else 16.dp),
         verticalArrangement = Arrangement.spacedBy(if (compactBookGrid) 12.dp else 16.dp),
     ) {
         item(span = { GridItemSpan(maxLineSpan) }) {
-            PageTitle(pageTitle, pageTitleAlpha)
+            PageTitle(pageTitle, pageTitleAlpha, stringResource(R.string.book_count, books.size), inset = 0.dp)
         }
         item(span = { GridItemSpan(maxLineSpan) }) {
             Column(
@@ -3576,50 +3493,50 @@ private fun BookGrid(
 }
 
 @Composable
-private fun PageTitle(title: String, alpha: Float) {
-    Text(
-        text = title,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+private fun PageTitle(title: String, alpha: Float, subtitle: String? = null, inset: Dp = 20.dp) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = inset).padding(top = 12.dp, bottom = 8.dp)
             .graphicsLayer { this.alpha = alpha },
-        style = MaterialTheme.typography.headlineLarge,
-        fontWeight = PageTitleFontWeight,
-    )
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(title, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+        subtitle?.let {
+            Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
 }
 
 @Composable
 private fun BookCard(book: Book, coverUrl: String?, accessToken: String?, compact: Boolean, onClick: () -> Unit) {
     val title = book.displayTitle()
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .semantics { contentDescription = "open $title" },
-        shape = RoundedCornerShape(8.dp),
+    val openLabel = stringResource(R.string.content_description_open_book, title)
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().semantics { contentDescription = openLabel },
+        shape = RoundedCornerShape(10.dp),
+        color = Color.Transparent,
     ) {
-        Column(
-            modifier = Modifier.padding(if (compact) 6.dp else 8.dp),
-            verticalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp),
-        ) {
-            BookCover(
-                bookId = book.id,
-                title = title,
-                url = coverUrl,
-                accessToken = accessToken,
-                modifier = Modifier.fillMaxWidth().aspectRatio(0.68f),
-            )
-            Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            val authors = book.displayAuthors()
-            if (authors.isNotBlank()) {
-                Text(
-                    authors,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+        Column(modifier = Modifier.padding(3.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box {
+                BookCover(
+                    bookId = book.id, title = title, url = coverUrl, accessToken = accessToken,
+                    modifier = Modifier.fillMaxWidth().aspectRatio(0.68f)
+                        .shadow(2.dp, RoundedCornerShape(8.dp)),
                 )
+                if (book.readStatus == "READING") {
+                    LinearProgressIndicator(
+                        progress = { (book.readingProgressPercent() / 100f).coerceIn(0f, 1f) },
+                        modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(3.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    )
+                }
             }
+            Text(title, style = MaterialTheme.typography.titleSmall.copy(fontSize = if (compact) 13.sp else 14.sp),
+                fontWeight = FontWeight.SemiBold, minLines = 2, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            val authors = book.displayAuthors()
+            if (authors.isNotBlank()) Text(authors, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -3627,134 +3544,101 @@ private fun BookCard(book: Book, coverUrl: String?, accessToken: String?, compac
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BookDetailScreen(
-    book: Book,
-    isLoading: Boolean,
-    isActionRunning: Boolean,
-    shelves: List<Shelf>,
-    isOfflineAvailable: Boolean,
-    localMode: Boolean,
-    offlineDownloadTask: OfflineDownloadTask?,
-    onBack: () -> Unit,
-    onUpdateStatus: (Long, String) -> Unit,
-    onUpdateRating: (Long, Int) -> Unit,
-    onAssignShelves: (Long, Set<Long>, Set<Long>) -> Unit,
-    onDownload: (Book) -> Unit,
-    onCancelDownload: (Book) -> Unit,
-    onRetryDownload: (Book) -> Unit,
-    onDeleteDownload: (Book) -> Unit,
-    onOpenReader: () -> Unit,
-    coverUrl: String?,
-    accessToken: String?,
+    book: Book, isLoading: Boolean, isActionRunning: Boolean, shelves: List<Shelf>,
+    isOfflineAvailable: Boolean, localMode: Boolean, offlineDownloadTask: OfflineDownloadTask?,
+    onBack: () -> Unit, onUpdateStatus: (Long, String) -> Unit, onUpdateRating: (Long, Int) -> Unit,
+    onAssignShelves: (Long, Set<Long>, Set<Long>) -> Unit, onDownload: (Book) -> Unit,
+    onCancelDownload: (Book) -> Unit, onRetryDownload: (Book) -> Unit, onDeleteDownload: (Book) -> Unit,
+    onOpenReader: () -> Unit, coverUrl: String?, accessToken: String?,
 ) {
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text(stringResource(R.string.book_details), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.content_description_back))
-                    }
-                },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
+                title = { Text(stringResource(R.string.book_details), style = MaterialTheme.typography.titleMedium) },
+                navigationIcon = { IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.content_description_back))
+                } },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            if (isLoading) {
-                item {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                }
-            }
-                item {
-                    Row(verticalAlignment = Alignment.Top) {
-                        BookCover(
-                            bookId = book.id,
-                            title = book.displayTitle(),
-                            url = coverUrl,
-                            accessToken = accessToken,
-                            modifier = Modifier.width(132.dp).aspectRatio(0.68f),
-                        )
-                        Spacer(Modifier.width(16.dp))
-                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(book.displayTitle(), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-                            Text(
-                                book.displayAuthors().ifBlank { stringResource(R.string.unknown_author) },
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            AssistChip(onClick = {}, label = { Text(book.formatName()) })
-                            book.metadata?.seriesName?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                        }
-                    }
-                }
-                item {
-                    Text(stringResource(R.string.reading_status), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    StatusChips(selected = book.readStatus, enabled = !isActionRunning && !localMode) { status -> onUpdateStatus(book.id, status) }
-                }
-                item {
-                    Text(stringResource(R.string.personal_rating), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    RatingChips(selected = book.personalRating, enabled = !isActionRunning && !localMode) { rating -> onUpdateRating(book.id, rating) }
-                }
-                if (shelves.isNotEmpty()) {
-                    item {
-                        Text(stringResource(R.string.shelves), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        ShelfChips(
-                            allShelves = shelves,
-                            bookShelfIds = book.shelves.map(Shelf::id).toSet(),
-                            enabled = !isActionRunning && !localMode,
-                        ) { shelfId, selected ->
-                            val assign = if (selected) setOf(shelfId) else emptySet()
-                            val unassign = if (selected) emptySet() else setOf(shelfId)
-                            onAssignShelves(book.id, assign, unassign)
-                        }
-                    }
-                }
-                item {
-                    Text(
-                        book.metadata?.description?.takeIf(String::isNotBlank) ?: stringResource(R.string.no_description),
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                }
-                if (localMode) {
-                    item {
-                        Text(
-                            stringResource(if (isOfflineAvailable) R.string.downloaded else R.string.cached_for_reading),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                } else if (book.supportsEpubReader() || book.supportsPdfReader()) {
-                    item {
-                        OfflineDownloadControl(
-                            isDownloaded = isOfflineAvailable,
-                            downloadTask = offlineDownloadTask,
-                            enabled = !isActionRunning,
-                            onDownload = { onDownload(book) },
-                            onCancel = { onCancelDownload(book) },
-                            onRetry = { onRetryDownload(book) },
-                            onDelete = { onDeleteDownload(book) },
-                        )
-                    }
-                }
-                item {
-                    Button(
-                        onClick = onOpenReader,
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !book.isPhysical.orFalse(),
-                    ) {
+        bottomBar = {
+            Surface(color = MaterialTheme.colorScheme.surface) {
+                Column {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Button(onClick = onOpenReader,
+                        modifier = Modifier.navigationBarsPadding().padding(horizontal = 20.dp, vertical = 12.dp)
+                            .fillMaxWidth().heightIn(min = 52.dp), enabled = !book.isPhysical.orFalse()) {
                         Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
+                        Spacer(Modifier.width(10.dp))
                         Text(stringResource(R.string.open_reader))
                     }
                 }
             }
+        },
+    ) { padding ->
+        LazyColumn(modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(22.dp)) {
+            if (isLoading) item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) }
+            item {
+                Column(modifier = Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    BookCover(book.id, book.displayTitle(), coverUrl, accessToken,
+                        Modifier.width(152.dp).aspectRatio(0.68f).shadow(6.dp, RoundedCornerShape(8.dp)))
+                    Text(book.displayTitle(), style = MaterialTheme.typography.headlineSmall,
+                        textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                    Text(book.displayAuthors().ifBlank { stringResource(R.string.unknown_author) },
+                        style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center)
+                    Surface(shape = RoundedCornerShape(6.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                        Text(book.formatName(), style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
+                    }
+                    book.metadata?.seriesName?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            item {
+                LibrarySection(stringResource(R.string.reading_status)) {
+                    StatusChips(book.readStatus, !isActionRunning && !localMode) { onUpdateStatus(book.id, it) }
+                }
+            }
+            item {
+                LibrarySection(stringResource(R.string.personal_rating)) {
+                    RatingChips(book.personalRating, !isActionRunning && !localMode) { onUpdateRating(book.id, it) }
+                }
+            }
+            if (shelves.isNotEmpty()) item {
+                LibrarySection(stringResource(R.string.shelves)) {
+                    ShelfChips(shelves, book.shelves.map(Shelf::id).toSet(), !isActionRunning && !localMode) { shelfId, selected ->
+                        onAssignShelves(book.id, if (selected) setOf(shelfId) else emptySet(),
+                            if (selected) emptySet() else setOf(shelfId))
+                    }
+                }
+            }
+            item {
+                LibrarySection(stringResource(R.string.book_description)) {
+                    Text(book.metadata?.description?.takeIf(String::isNotBlank) ?: stringResource(R.string.no_description),
+                        style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            item {
+                if (localMode) {
+                    Text(stringResource(if (isOfflineAvailable) R.string.downloaded else R.string.cached_for_reading),
+                        style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                } else if (book.supportsEpubReader() || book.supportsPdfReader()) {
+                    OfflineDownloadControl(isDownloaded = isOfflineAvailable, downloadTask = offlineDownloadTask,
+                        enabled = !isActionRunning, onDownload = { onDownload(book) }, onCancel = { onCancelDownload(book) },
+                        onRetry = { onRetryDownload(book) }, onDelete = { onDeleteDownload(book) })
+                }
+            }
         }
+    }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun StatusChips(selected: String?, enabled: Boolean, onSelected: (String) -> Unit) {
     val statuses = listOf(
@@ -3762,7 +3646,7 @@ private fun StatusChips(selected: String?, enabled: Boolean, onSelected: (String
         "READING" to R.string.reading,
         "READ" to R.string.read,
     )
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         statuses.forEach { (value, label) ->
             FilterChip(
                 selected = selected == value,
@@ -3848,191 +3732,82 @@ private fun ReaderPreparationScreen(
 
 @Composable
 private fun SettingsCatalog(
-    serverUrl: String?,
-    localMode: Boolean,
-    onLocalModeChanged: (Boolean) -> Unit,
-    compactBookGrid: Boolean,
-    syncStatus: SyncStatus,
-    offlineDownloadTasks: List<OfflineDownloadTask>,
-    onCompactBookGridChanged: (Boolean) -> Unit,
-    onOpenAppearanceEditor: () -> Unit,
-    onOpenCache: () -> Unit,
-    onSignOut: () -> Unit,
-    onRefreshSyncStatus: () -> Unit,
-    onSyncNow: () -> Unit,
-    onOpenOfflineDownloads: () -> Unit,
-    gridState: LazyGridState,
-    pageTitle: String,
-    pageTitleAlpha: Float,
+    serverUrl: String?, localMode: Boolean, onLocalModeChanged: (Boolean) -> Unit,
+    compactBookGrid: Boolean, syncStatus: SyncStatus, offlineDownloadTasks: List<OfflineDownloadTask>,
+    onCompactBookGridChanged: (Boolean) -> Unit, onOpenAppearanceEditor: () -> Unit,
+    onOpenCache: () -> Unit, onSignOut: () -> Unit, onRefreshSyncStatus: () -> Unit,
+    onSyncNow: () -> Unit, onOpenOfflineDownloads: () -> Unit, gridState: LazyGridState,
+    pageTitle: String, pageTitleAlpha: Float,
 ) {
-    // Re-reads the offline queue whenever the settings tab becomes visible.
     LaunchedEffect(Unit) { onRefreshSyncStatus() }
     val lastSyncLabel = syncStatus.lastSyncTimeMs?.let { timeMs ->
         remember(timeMs) {
             DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT)
-                .withLocale(Locale.getDefault())
-                .format(Instant.ofEpochMilli(timeMs).atZone(ZoneId.systemDefault()))
+                .withLocale(Locale.getDefault()).format(Instant.ofEpochMilli(timeMs).atZone(ZoneId.systemDefault()))
         }
     }
-    val queueLabel = if (syncStatus.pendingCount == 0) {
-        stringResource(R.string.sync_queue_empty)
-    } else {
-        stringResource(R.string.sync_queue_pending, syncStatus.pendingCount)
+    val queueLabel = if (syncStatus.pendingCount == 0) stringResource(R.string.sync_queue_empty)
+        else stringResource(R.string.sync_queue_pending, syncStatus.pendingCount)
+    val activeTaskCount = offlineDownloadTasks.count(OfflineDownloadTask::isActive)
+    val downloadSummary = when {
+        activeTaskCount > 0 -> stringResource(R.string.offline_downloads_active_count, activeTaskCount)
+        offlineDownloadTasks.isEmpty() -> stringResource(R.string.download_queue_empty)
+        else -> stringResource(R.string.offline_downloads_task_count, offlineDownloadTasks.size)
     }
     LazyVerticalGrid(
-        columns = GridCells.Fixed(1),
-        modifier = Modifier.fillMaxSize(),
-        state = gridState,
-        contentPadding = PaddingValues(bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        columns = GridCells.Fixed(1), modifier = Modifier.fillMaxSize(), state = gridState,
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(22.dp),
     ) {
+        item { PageTitle(pageTitle, pageTitleAlpha, inset = 0.dp) }
         item {
-            PageTitle(pageTitle, pageTitleAlpha)
+            LibrarySection(stringResource(R.string.about_server)) {
+                LibrarySettingsRow(Icons.AutoMirrored.Filled.LibraryBooks, stringResource(R.string.server_address),
+                    serverUrl ?: stringResource(R.string.local_mode))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                LibrarySettingsRow(Icons.Filled.CloudOff, stringResource(R.string.local_mode),
+                    stringResource(R.string.local_mode_summary),
+                    trailing = {
+                        val label = stringResource(R.string.local_mode)
+                        Switch(checked = localMode, onCheckedChange = onLocalModeChanged,
+                            modifier = Modifier.semantics { contentDescription = label })
+                    })
+            }
         }
         item {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                Text(stringResource(R.string.about_server), style = MaterialTheme.typography.titleMedium, fontWeight = PageTitleFontWeight)
-                serverUrl?.let { url ->
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(stringResource(R.string.server_address), style = MaterialTheme.typography.labelLarge)
-                        Text(url, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(stringResource(R.string.local_mode), style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            stringResource(R.string.local_mode_summary),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Switch(checked = localMode, onCheckedChange = onLocalModeChanged)
-                }
-                Text(stringResource(R.string.storage), style = MaterialTheme.typography.titleMedium, fontWeight = PageTitleFontWeight)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = onOpenCache)
-                        .padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(stringResource(R.string.cache), style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            stringResource(R.string.cache_summary),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Icon(
-                        imageVector = Icons.Filled.Storage,
-                        contentDescription = stringResource(R.string.content_description_open_cache),
-                    )
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = onOpenOfflineDownloads)
-                        .padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    val activeTaskCount = offlineDownloadTasks.count(OfflineDownloadTask::isActive)
-                    val summary = when {
-                        activeTaskCount > 0 -> stringResource(
-                            R.string.offline_downloads_active_count,
-                            activeTaskCount,
-                        )
-                        offlineDownloadTasks.isEmpty() -> stringResource(R.string.download_queue_empty)
-                        else -> stringResource(R.string.offline_downloads_task_count, offlineDownloadTasks.size)
-                    }
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(stringResource(R.string.offline_downloads), style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            text = summary,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                        contentDescription = stringResource(R.string.content_description_open_offline_downloads),
-                    )
-                }
-                HorizontalDivider()
-                Text(stringResource(R.string.sync), style = MaterialTheme.typography.titleMedium, fontWeight = PageTitleFontWeight)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(enabled = !localMode, onClick = onSyncNow)
-                        .padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(stringResource(R.string.sync_now), style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            queueLabel,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            stringResource(R.string.sync_last_time, lastSyncLabel ?: stringResource(R.string.sync_never)),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                        contentDescription = stringResource(R.string.sync_now),
-                    )
-                }
-                HorizontalDivider()
-                Text(stringResource(R.string.display), style = MaterialTheme.typography.titleMedium, fontWeight = PageTitleFontWeight)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = onOpenAppearanceEditor)
-                        .padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(stringResource(R.string.appearance), style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            stringResource(R.string.appearance_summary),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                        contentDescription = stringResource(R.string.content_description_open_appearance),
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(stringResource(R.string.compact_book_grid), style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            stringResource(R.string.compact_book_grid_summary),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Switch(checked = compactBookGrid, onCheckedChange = onCompactBookGridChanged)
-                }
-                HorizontalDivider()
-                if (serverUrl != null) {
-                    OutlinedButton(onClick = onSignOut) { Text(stringResource(R.string.sign_out)) }
-                }
+            LibrarySection(stringResource(R.string.storage)) {
+                LibrarySettingsRow(Icons.Filled.Download, stringResource(R.string.offline_downloads), downloadSummary,
+                    onClick = onOpenOfflineDownloads)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                LibrarySettingsRow(Icons.Filled.Storage, stringResource(R.string.cache), stringResource(R.string.cache_summary),
+                    onClick = onOpenCache)
+            }
+        }
+        item {
+            LibrarySection(stringResource(R.string.sync)) {
+                LibrarySettingsRow(Icons.Filled.Refresh, stringResource(R.string.sync_now),
+                    queueLabel + "\n" + stringResource(R.string.sync_last_time, lastSyncLabel ?: stringResource(R.string.sync_never)),
+                    enabled = !localMode, onClick = onSyncNow)
+            }
+        }
+        item {
+            LibrarySection(stringResource(R.string.display)) {
+                LibrarySettingsRow(Icons.Filled.Settings, stringResource(R.string.appearance), stringResource(R.string.appearance_summary),
+                    onClick = onOpenAppearanceEditor)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                LibrarySettingsRow(Icons.AutoMirrored.Filled.LibraryBooks, stringResource(R.string.compact_book_grid),
+                    stringResource(R.string.compact_book_grid_summary),
+                    trailing = {
+                        val label = stringResource(R.string.compact_book_grid)
+                        Switch(checked = compactBookGrid, onCheckedChange = onCompactBookGridChanged,
+                            modifier = Modifier.semantics { contentDescription = label })
+                    })
+            }
+        }
+        if (serverUrl != null) item {
+            OutlinedButton(onClick = onSignOut, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+                Text(stringResource(R.string.sign_out), color = MaterialTheme.colorScheme.error)
             }
         }
     }
@@ -4589,24 +4364,10 @@ private fun fontLabel(option: FontOption): String = when (option) {
 @Suppress("ProduceStateDoesNotAssignValue") // Lint does not resolve ProduceStateScope's K2 receiver assignment.
 private fun BookCover(bookId: Long, title: String, url: String?, accessToken: String?, modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    val coverStore = remember(context.applicationContext) { BookCoverStore(context.applicationContext) }
     val cachedCover by produceState<File?>(initialValue = null, bookId, url) {
         this.value = null
-        this.value = withContext(Dispatchers.IO) {
-            val sessionStore = SessionStore(context.applicationContext)
-            val baseUrl = sessionStore.readCatalogBaseUrl()
-            if (baseUrl == null) {
-                null
-            } else {
-                val cacheDirectory = File(context.cacheDir, "book-covers")
-                val destination = File(cacheDirectory, "${baseUrl.hashCode()}-$bookId.cover")
-                if (destination.isFile && destination.length() > 0L) {
-                    destination
-                } else {
-                    if (sessionStore.readLocalMode()) null
-                    else runCatching { BookLoreApi(sessionStore).downloadCover(bookId, destination) }.getOrNull()
-                }
-            }
-        }
+        this.value = coverStore.resolve(bookId)
     }
     val request = remember(cachedCover, url, accessToken) {
         (cachedCover ?: url)?.let {
@@ -4623,7 +4384,7 @@ private fun BookCover(bookId: Long, title: String, url: String?, accessToken: St
     }
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center,
     ) {
@@ -4654,10 +4415,16 @@ private fun BookCover(bookId: Long, title: String, url: String?, accessToken: St
 
 @Composable
 private fun BookCoverFallback(title: String) {
+    val accent = when (title.hashCode().and(Int.MAX_VALUE) % 3) {
+        0 -> MaterialTheme.colorScheme.primary
+        1 -> MaterialTheme.colorScheme.secondary
+        else -> MaterialTheme.colorScheme.tertiary
+    }
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .padding(8.dp),
+            .background(lerp(MaterialTheme.colorScheme.surface, accent, 0.10f))
+            .padding(12.dp),
         contentAlignment = Alignment.Center,
     ) {
         val compactCover = maxWidth < 80.dp || maxHeight < 120.dp
@@ -4671,12 +4438,13 @@ private fun BookCoverFallback(title: String) {
                     imageVector = Icons.AutoMirrored.Filled.MenuBook,
                     contentDescription = null,
                     modifier = Modifier.size(28.dp),
-                    tint = LocalContentColor.current,
+                    tint = accent,
                 )
             }
             Text(
                 text = title,
                 modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.labelMedium.copy(
                     fontSize = titleFontSize,
                     lineHeight = titleFontSize * 1.15f,
@@ -4690,27 +4458,28 @@ private fun BookCoverFallback(title: String) {
 }
 
 private fun fallbackCoverTitleSize(titleLength: Int, compactCover: Boolean) = when {
-    compactCover && titleLength > 80 -> 4.sp
-    compactCover && titleLength > 50 -> 5.sp
-    compactCover && titleLength > 30 -> 6.sp
-    compactCover && titleLength > 18 -> 7.sp
-    compactCover -> 8.sp
-    titleLength > 100 -> 6.sp
-    titleLength > 70 -> 7.sp
-    titleLength > 45 -> 8.sp
-    titleLength > 25 -> 9.sp
-    else -> 10.sp
+    compactCover && titleLength > 80 -> 5.sp
+    compactCover && titleLength > 50 -> 6.sp
+    compactCover && titleLength > 30 -> 8.sp
+    compactCover && titleLength > 18 -> 9.sp
+    compactCover -> 11.sp
+    titleLength > 100 -> 8.sp
+    titleLength > 70 -> 9.sp
+    titleLength > 45 -> 11.sp
+    titleLength > 25 -> 13.sp
+    else -> 16.sp
 }
 
 @Composable
 private fun EmptyState(onRefresh: () -> Unit) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(32.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        Icon(Icons.AutoMirrored.Filled.LibraryBooks, contentDescription = null,
+            modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(stringResource(R.string.no_books), style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(12.dp))
         OutlinedButton(onClick = onRefresh) { Text(stringResource(R.string.retry)) }
     }
 }

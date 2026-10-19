@@ -311,4 +311,6 @@
     <string name="local_library_empty_summary">Connect to your server and download a book, or let its reading cache finish saving before going offline.</string>
     <string name="cached_for_reading">Cached for offline reading</string>
     <string name="local_book_unavailable">This book has no complete local copy. Connect to the server to download it.</string>
+    <string name="reading_home_subtitle">Pick up where you left off.</string>
+    <string name="book_description">About this book</string>
 </resources>

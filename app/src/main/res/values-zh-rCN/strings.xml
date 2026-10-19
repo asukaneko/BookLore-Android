@@ -311,4 +311,6 @@
     <string name="local_library_empty_summary">连接服务器后下载书籍，或等阅读缓存完整保存后，再离线阅读。</string>
     <string name="cached_for_reading">已缓存，可离线阅读</string>
     <string name="local_book_unavailable">这本书还没有完整的本地文件，请连接服务器后下载。</string>
+    <string name="reading_home_subtitle">从上次读到的地方继续</string>
+    <string name="book_description">关于这本书</string>
 </resources>

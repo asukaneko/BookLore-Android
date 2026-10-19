@@ -9,6 +9,15 @@ import java.util.zip.ZipFile
 
 /** Finds complete book copies; partial downloads and sparse streaming files are never listed. */
 class LocalBookFiles(private val filesDirectory: File) {
+    /** Cover lookup also works for cached books created before cover persistence was introduced. */
+    fun find(bookId: Long): File? = listOf("offline-books", "reader-cache").asSequence()
+        .flatMap { directory ->
+            File(filesDirectory, directory).listFiles().orEmpty().asSequence()
+                .filter { it.name.startsWith("$bookId-") && it.extension.lowercase() in setOf("epub", "pdf") }
+                .sortedByDescending(File::lastModified)
+        }
+        .firstOrNull(::isReadableBookFile)
+
     fun find(book: Book): File? {
         val fileId = book.primaryFile?.id ?: return null
         val extension = when {

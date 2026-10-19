@@ -3,6 +3,7 @@ package app.booklore.android.core.offline
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import app.booklore.android.core.cache.BookCoverStore
 import app.booklore.android.core.database.BookLoreDatabase
 import app.booklore.android.core.network.BookLoreApi
 import app.booklore.android.core.security.SessionStore
@@ -52,6 +53,8 @@ class OfflineDownloadWorker(
                 return fail(dao, taskKey, "Downloaded file is invalid")
             }
             val totalBytes = destination.length()
+            // Keep the cover with the book, even when the book has never been opened in the UI.
+            BookCoverStore(applicationContext, sessionStore).resolve(task.bookId)
             dao.markFinished(
                 taskKey = taskKey,
                 status = OfflineDownloadStatus.COMPLETED.name,

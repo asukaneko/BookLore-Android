@@ -16,6 +16,24 @@ class LocalBookFilesTest {
     @get:Rule val temporary = TemporaryFolder()
 
     @Test
+    fun `cover lookup finds both downloaded books and existing reader caches by book ID`() {
+        val downloaded = epubFile("offline-books/1-7.epub")
+        val cached = pdfFile("reader-cache/2-7.pdf")
+
+        assertEquals(downloaded, store().find(1L))
+        assertEquals(cached, store().find(2L))
+    }
+
+    @Test
+    fun `cover lookup does not pick another book or an unfinished file`() {
+        epubFile("offline-books/12-7.epub")
+        epubFile("offline-books/1-7.epub.part")
+        pdfFile("reader-cache/1-7.pdf.streaming")
+
+        assertNull(store().find(1L))
+    }
+
+    @Test
     fun `local library includes downloads and complete reading caches`() {
         val epub = book(1, "EPUB")
         val pdf = book(2, "PDF")
