@@ -14,9 +14,14 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.rememberScrollableState
+import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Arrangement
@@ -30,11 +35,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
@@ -58,18 +61,20 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -97,6 +102,7 @@ import app.booklore.android.sync.PendingSyncQueue
 import app.booklore.android.ui.theme.BookLoreTheme
 import java.io.File
 import kotlin.math.min
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 import kotlinx.coroutines.Dispatchers
@@ -281,11 +287,9 @@ private fun PdfContinuousDocument(
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = currentPage - 1)
-    val scope = rememberCoroutineScope()
-    // Pinch zoom changes the width pages are laid out and rendered at; the
-    // document becomes horizontally pannable through the scroll state.
     var pageZoom by remember { mutableFloatStateOf(1f) }
-    val horizontalScroll = rememberScrollState()
+    var horizontalOffset by remember { mutableFloatStateOf(0f) }
+    var pinchAnchor by remember { mutableStateOf<PdfPageZoomAnchor?>(null) }
 
     LaunchedEffect(listState) {
         // Do not feed every page boundary back into the whole reader while the
@@ -308,43 +312,82 @@ private fun PdfContinuousDocument(
     }
 
     BoxWithConstraints(
-        modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant),
+        modifier = modifier
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clipToBounds(),
     ) {
-        val viewportWidth = maxWidth
-        Box(
+        val viewportWidth = constraints.maxWidth
+        val pageWidth = (viewportWidth * pageZoom).roundToInt()
+        val horizontalScroll = rememberScrollableState { delta ->
+            val oldOffset = horizontalOffset
+            horizontalOffset = (oldOffset - delta).coerceIn(0f, (pageWidth - viewportWidth).toFloat())
+            oldOffset - horizontalOffset
+        }
+        val onPinch by rememberUpdatedState<(Offset, Offset, Float) -> Unit> { centroid, pan, zoomChange ->
+            val layoutInfo = listState.layoutInfo
+            val centroidY = centroid.y - layoutInfo.beforeContentPadding
+            val anchor = pinchAnchor ?: layoutInfo.visibleItemsInfo.minByOrNull { item ->
+                // Pick the page under the fingers, or the closest page in a gap/padding.
+                abs(centroidY - centroidY.coerceIn(item.offset.toFloat(), (item.offset + item.size).toFloat()))
+            }?.let { item ->
+                PdfPageZoomAnchor(item.index, (centroidY - item.offset) / item.size.coerceAtLeast(1))
+            }
+            if (anchor != null) {
+                pinchAnchor = anchor
+                val newZoom = (pageZoom * zoomChange).coerceIn(1f, CONTINUOUS_MAX_ZOOM)
+                val oldWidth = (viewportWidth * pageZoom).roundToInt()
+                val newWidth = (viewportWidth * newZoom).roundToInt()
+                val translation = pdfZoomTranslation(
+                    translation = Offset(-horizontalOffset, 0f),
+                    centroid = centroid,
+                    pan = pan,
+                    scaleRatio = newWidth.toFloat() / oldWidth.coerceAtLeast(1),
+                )
+                horizontalOffset = (-translation.x).coerceIn(0f, (newWidth - viewportWidth).toFloat())
+                pageZoom = newZoom
+                // Schedule the vertical anchor and new page width in the same remeasure.
+                listState.requestScrollToItem(
+                    anchor.pageIndex,
+                    anchor.scrollOffset(
+                        pageHeight = (newWidth / PDF_PAGE_ASPECT_RATIO).roundToInt(),
+                        centroidY = centroid.y + pan.y,
+                        topPadding = layoutInfo.beforeContentPadding,
+                    ),
+                )
+                onZoomedChanged(newZoom > 1.01f)
+            }
+        }
+        val onPinchEnd by rememberUpdatedState { pinchAnchor = null }
+        LazyColumn(
+            state = listState,
+            contentPadding = PaddingValues(
+                top = if (controlsVisible) 64.dp else 0.dp,
+                bottom = if (controlsVisible) 120.dp else 0.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier
                 .fillMaxSize()
-                .horizontalScroll(horizontalScroll)
-                .pdfPinchZoom { zoomChange ->
-                    val newZoom = (pageZoom * zoomChange).coerceIn(1f, CONTINUOUS_MAX_ZOOM)
-                    if (newZoom != pageZoom) {
-                        // Keep the horizontal anchor roughly stable across the zoom change;
-                        // the scroll range catches up with the new layout on the next frame.
-                        val target = (horizontalScroll.value * newZoom / pageZoom).roundToInt()
-                        pageZoom = newZoom
-                        onZoomedChanged(newZoom > 1.01f)
-                        scope.launch { horizontalScroll.scrollTo(target) }
+                .pdfPinchZoom(
+                    onGestureEnd = { onPinchEnd() },
+                    onTransform = { centroid, pan, zoom -> onPinch(centroid, pan, zoom) },
+                )
+                .scrollable(horizontalScroll, Orientation.Horizontal, enabled = pageZoom > 1f)
+                .layout { measurable, viewportConstraints ->
+                    // Gesture coordinates stay in the viewport while the document grows.
+                    val width = (viewportConstraints.maxWidth * pageZoom).roundToInt()
+                    val document = measurable.measure(viewportConstraints.copy(minWidth = width, maxWidth = width))
+                    layout(viewportConstraints.maxWidth, document.height) {
+                        val maxOffset = (width - viewportConstraints.maxWidth).toFloat()
+                        document.place(-horizontalOffset.coerceIn(0f, maxOffset).roundToInt(), 0)
                     }
                 },
         ) {
-            LazyColumn(
-                state = listState,
-                contentPadding = PaddingValues(
-                    top = if (controlsVisible) 64.dp else 0.dp,
-                    bottom = if (controlsVisible) 120.dp else 0.dp,
-                ),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                items(pageCount, key = { index -> index }) { index ->
-                    PdfPage(
-                        page = index + 1,
-                        viewModel = viewModel,
-                        modifier = Modifier
-                            .requiredWidth(viewportWidth * pageZoom)
-                            .aspectRatio(PDF_PAGE_ASPECT_RATIO),
-                    )
-                }
+            items(pageCount, key = { index -> index }) { index ->
+                PdfPage(
+                    page = index + 1,
+                    viewModel = viewModel,
+                    modifier = Modifier.fillMaxWidth().aspectRatio(PDF_PAGE_ASPECT_RATIO),
+                )
             }
         }
     }
@@ -355,35 +398,37 @@ private fun PdfContinuousDocument(
  * the surrounding LazyColumn scroll keeps working. Pinch events are consumed
  * on the Initial pass to stop the list from scrolling mid-pinch.
  */
-private fun Modifier.pdfPinchZoom(onZoomChange: (Float) -> Unit): Modifier = pointerInput(Unit) {
+private fun Modifier.pdfPinchZoom(
+    onGestureEnd: () -> Unit,
+    onTransform: (Offset, Offset, Float) -> Unit,
+): Modifier = pointerInput(Unit) {
     awaitEachGesture {
         var zooming = false
-        var previousDistance = 0f
-        while (true) {
-            val event = awaitPointerEvent(PointerEventPass.Initial)
-            val pressedChanges = event.changes.filter { it.pressed }
-            when {
-                pressedChanges.size >= 2 -> {
-                    zooming = true
-                    val distance = pressedChanges[0].position.distanceTo(pressedChanges[1].position)
-                    if (previousDistance > 0f && distance > 0f) {
-                        onZoomChange(distance / previousDistance)
+        try {
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                val pressedChanges = event.changes.filter { it.pressed }
+                when {
+                    pressedChanges.size >= 2 -> {
+                        zooming = true
+                        if (pressedChanges.count { it.previousPressed } >= 2) {
+                            onTransform(event.calculateCentroid(useCurrent = false), event.calculatePan(), event.calculateZoom())
+                        }
+                        event.changes.forEach { it.consume() }
                     }
-                    previousDistance = distance
-                    event.changes.forEach { it.consume() }
-                }
-                pressedChanges.isEmpty() -> break
-                zooming -> {
-                    // Consume the leftover finger so the list does not fling after the pinch.
-                    previousDistance = 0f
-                    event.changes.forEach { it.consume() }
+                    pressedChanges.isEmpty() -> break
+                    zooming -> {
+                        // Consume the leftover finger so the list does not fling after the pinch.
+                        onGestureEnd()
+                        event.changes.forEach { it.consume() }
+                    }
                 }
             }
+        } finally {
+            onGestureEnd()
         }
     }
 }
-
-private fun Offset.distanceTo(other: Offset): Float = (this - other).getDistance()
 
 @Composable
 private fun PdfPage(
@@ -437,10 +482,7 @@ private fun PdfPage(
                             val center = Offset(size.width / 2f, size.height / 2f)
                             // 让手指下的内容点在缩放前后保持不动：以 centroid 为锚
                             // 计算新的平移量（围绕中心缩放 + translation 的组合）。
-                            val anchored = Offset(
-                                (centroid.x - center.x) - (centroid.x - zoomOffset.x - center.x) * ratio,
-                                (centroid.y - center.y) - (centroid.y - zoomOffset.y - center.y) * ratio,
-                            ) + panChange * ratio
+                            val anchored = pdfZoomTranslation(zoomOffset, centroid, panChange, ratio, center)
                             zoomScale = newScale
                             zoomOffset = if (newScale <= 1.01f) Offset.Zero else anchored.clampToPage(size.width, size.height, newScale)
                             onZoomedChanged?.invoke(newScale > 1.01f)
@@ -463,21 +505,22 @@ private fun PdfPage(
                             },
                         )
                     }
-                    .graphicsLayer {
+            } else {
+                Modifier.fillMaxSize()
+            }
+            Box(modifier = imageModifier) {
+                Image(
+                    bitmap = pageBitmap.asImageBitmap(),
+                    contentDescription = stringResource(R.string.pdf_page_content_description, page),
+                    modifier = Modifier.fillMaxSize().graphicsLayer {
                         scaleX = zoomScale
                         scaleY = zoomScale
                         translationX = zoomOffset.x
                         translationY = zoomOffset.y
-                    }
-            } else {
-                Modifier.fillMaxSize()
+                    },
+                    contentScale = ContentScale.Fit,
+                )
             }
-            Image(
-                bitmap = pageBitmap.asImageBitmap(),
-                contentDescription = stringResource(R.string.pdf_page_content_description, page),
-                modifier = imageModifier,
-                contentScale = ContentScale.Fit,
-            )
         }
         if (bitmap == null && isRendering) {
             CircularProgressIndicator()
